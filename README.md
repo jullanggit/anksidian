@@ -1,0 +1,8 @@
+- Capture all highlighted areas (possibly multiline)
+- Convert math to anki-compatible math (Only handle inline math)
+- Wrap in anki syntax
+- See if an ID comment is present on the line below
+  - Yes:
+    - Update Note with that ID
+  - No:
+    - create a new one
