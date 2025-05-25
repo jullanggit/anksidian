@@ -1,3 +1,7 @@
+My cli for converting Obsidian Markdown files to anki clozure flashcards
+
+## Process
+
 - Capture all highlighted areas (possibly multiline)
 - Convert math to anki-compatible math (Only handle inline math)
 - Wrap in anki syntax
