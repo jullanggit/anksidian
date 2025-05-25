@@ -1,6 +1,6 @@
 cargo-features = ["codegen-backend"]
 [package]
-name = "obsidian_to_anki"
+name = "anksidian"
 version = "0.1.0"
 edition = "2024"
 
