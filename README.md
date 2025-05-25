@@ -10,3 +10,5 @@ My cli for converting Obsidian Markdown files to anki clozure flashcards
     - Update Note with that ID
   - No:
     - create a new one
+
+![brainmademark](https://brainmade.org/black-logo.svg)
