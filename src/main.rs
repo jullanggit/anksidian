@@ -30,25 +30,19 @@ const TEST_MD: &str = "## Definition
 ## Mixed
 ==Idkman $$gamma$$ me neither==";
 
-#[derive(Debug)]
-struct SubStrWithSurroundingNewlines {
-    sub_str: String,
-    previous_newline: usize,
-    start: usize,
-    end: usize,
-    next_newline: usize,
-}
-
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
     // TODO: remove
     {
+        let client = reqwest::Client::new();
         fs::write("/tmp/test", TEST_MD);
-        handle_md(&PathBuf::from("/tmp/test")).await.unwrap();
+        handle_md(&PathBuf::from("/tmp/test"), &client)
+            .await
+            .unwrap();
     }
 }
 
-async fn traverse(dir: PathBuf) -> io::Result<()> {
+async fn traverse(dir: PathBuf, client: &reqwest::Client) -> io::Result<()> {
     for entry in dir.read_dir()?.flatten() {
         let path = entry.path();
         // recurse
@@ -57,13 +51,13 @@ async fn traverse(dir: PathBuf) -> io::Result<()> {
                 .map(AsRef::<Path>::as_ref)
                 .contains(&path.as_path())
         {
-            Box::pin(traverse(path)).await?;
+            Box::pin(traverse(path, client)).await?;
         // markdown file
         } else if path.is_file()
             && let Some(extension) = path.extension()
             && extension == "md"
         {
-            handle_md(&path).await?;
+            handle_md(&path, client).await?;
         }
     }
 
@@ -76,7 +70,7 @@ enum Math {
     Display,
 }
 
-async fn handle_md(path: &Path) -> io::Result<()> {
+async fn handle_md(path: &Path, client: &reqwest::Client) -> io::Result<()> {
     let file_contents = fs::read_to_string(path)?;
 
     let mut clozes = Vec::new(); // todo: handle ID
@@ -188,7 +182,7 @@ async fn handle_md(path: &Path) -> io::Result<()> {
     // todo: remove this
     {
         for cloze in clozes {
-            dbg!(add_cloze_note(cloze, Vec::new()).await);
+            dbg!(add_cloze_note(cloze, Vec::new(), client).await);
         }
     }
     Ok(())
