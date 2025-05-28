@@ -8,7 +8,6 @@ use std::{
     mem,
     path::{Path, PathBuf},
     process::{Command, Stdio},
-    usize,
 };
 
 const IGNORE_PATHS: [&str; 1] = ["./Excalidraw"];
@@ -66,8 +65,6 @@ fn traverse(dir: PathBuf) -> io::Result<()> {
 }
 
 fn format_to_anki(file_contents: &str) {
-    let num_chars = file_contents.chars().count();
-
     let mut clozes = Vec::new(); // todo: handle ID
     let mut line = 0;
     let mut current_text = String::new();
@@ -77,11 +74,40 @@ fn format_to_anki(file_contents: &str) {
 
     // init iter
     let mut i = 0;
+    // skip to the newline before the next cloze
+    let skip_before_next_cloze = |file_contents: &str, i: &mut usize, line: &mut usize| {
+        if let Some(next_cloze_offset) = file_contents
+            .chars()
+            .skip(*i)
+            .map_windows(|chars| *chars == ['='; 2])
+            .position(identity)
+        {
+            let (newline_before_offset, (newlines_skipped, _)) = file_contents
+                .chars()
+                .skip(*i)
+                .take(next_cloze_offset)
+                .enumerate()
+                .filter(|(_, char)| *char == '\n')
+                .enumerate()
+                .last()
+                .unwrap_or_default();
+            *i += newline_before_offset;
+            *line += newlines_skipped;
+
+            true
+        // No more clozes in the file
+        } else {
+            false
+        }
+    };
+    if !skip_before_next_cloze(file_contents, &mut i, &mut line) {
+        return;
+    };
     loop {
         let Some(char_a) = file_contents.chars().nth(i) else {
             break;
         };
-        let char_b = file_contents.chars().nth(i).unwrap_or_default();
+        let char_b = file_contents.chars().nth(i + 1).unwrap_or_default();
         match [char_a, char_b] {
             ['\n', _] => {
                 line += 1;
@@ -96,26 +122,7 @@ fn format_to_anki(file_contents: &str) {
                     line_contains_cloze = false;
                     num_cloze = 1;
 
-                    // skip to the newline before the next cloze
-                    if let Some(next_cloze_offset) = file_contents
-                        .chars()
-                        .skip(i)
-                        .map_windows(|chars| *chars == ['='; 2])
-                        .position(identity)
-                    {
-                        let (newline_before_offset, (newlines_skipped, _)) = file_contents
-                            .chars()
-                            .skip(i)
-                            .take(next_cloze_offset)
-                            .enumerate()
-                            .filter(|(_, char)| *char == '\n')
-                            .enumerate()
-                            .last()
-                            .expect("Should always match at least i");
-                        i += newline_before_offset;
-                        line += newlines_skipped;
-                    // No more clozes in the file
-                    } else {
+                    if !skip_before_next_cloze(file_contents, &mut i, &mut line) {
                         break;
                     }
                 }
@@ -126,7 +133,7 @@ fn format_to_anki(file_contents: &str) {
                 if in_cloze {
                     current_text.push_str("}}");
                 } else {
-                    current_text.push_str(&format!("{{c{num_cloze}::")); // could be done without an allocation
+                    current_text.push_str(&format!("{{{{c{num_cloze}::")); // could be done without an allocation
                     num_cloze += 1;
                 }
 
@@ -140,10 +147,12 @@ fn format_to_anki(file_contents: &str) {
         }
         i += 1;
     }
+    dbg!(clozes);
 }
 
 fn handle_md(file: &Path) -> io::Result<()> {
     let contents = fs::read_to_string(file)?;
+    format_to_anki(&contents);
     let converted_math = convert_math(&contents)?;
     let removed_hyperlinks = converted_math.replace("[[", "").replace("]]", "");
 
