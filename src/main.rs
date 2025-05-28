@@ -1,5 +1,6 @@
 #![feature(exit_status_error)]
 #![feature(iter_map_windows)]
+#![feature(default_field_values)]
 
 use std::{
     convert::identity,
@@ -9,6 +10,10 @@ use std::{
     path::{Path, PathBuf},
     process::{Command, Stdio},
 };
+
+use anki::add_cloze_note;
+
+mod anki;
 
 const IGNORE_PATHS: [&str; 1] = ["./Excalidraw"];
 
@@ -34,15 +39,16 @@ struct SubStrWithSurroundingNewlines {
     next_newline: usize,
 }
 
-fn main() {
+#[tokio::main(flavor = "current_thread")]
+async fn main() {
     // TODO: remove
     {
         fs::write("/tmp/test", TEST_MD);
-        handle_md(&PathBuf::from("/tmp/test"));
+        handle_md(&PathBuf::from("/tmp/test")).await.unwrap();
     }
 }
 
-fn traverse(dir: PathBuf) -> io::Result<()> {
+async fn traverse(dir: PathBuf) -> io::Result<()> {
     for entry in dir.read_dir()?.flatten() {
         let path = entry.path();
         // recurse
@@ -51,13 +57,13 @@ fn traverse(dir: PathBuf) -> io::Result<()> {
                 .map(AsRef::<Path>::as_ref)
                 .contains(&path.as_path())
         {
-            traverse(path)?;
+            Box::pin(traverse(path)).await?;
         // markdown file
         } else if path.is_file()
             && let Some(extension) = path.extension()
             && extension == "md"
         {
-            handle_md(&path)?;
+            handle_md(&path).await?;
         }
     }
 
@@ -70,7 +76,7 @@ enum Math {
     Display,
 }
 
-fn handle_md(path: &Path) -> io::Result<()> {
+async fn handle_md(path: &Path) -> io::Result<()> {
     let file_contents = fs::read_to_string(path)?;
 
     let mut clozes = Vec::new(); // todo: handle ID
@@ -179,7 +185,12 @@ fn handle_md(path: &Path) -> io::Result<()> {
         }
         i += 1;
     }
-    dbg!(clozes);
+    // todo: remove this
+    {
+        for cloze in clozes {
+            dbg!(add_cloze_note(cloze, Vec::new()).await);
+        }
+    }
     Ok(())
 }
 
