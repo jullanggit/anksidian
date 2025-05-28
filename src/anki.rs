@@ -43,12 +43,13 @@ impl<P: Serialize> Request<P> {
 enum Action {
     AddNote,
     CreateDeck,
+    UpdateNodeFields,
 }
 
 #[derive(Serialize, Debug)]
 #[serde(rename_all = "camelCase")]
-struct AddNote {
-    note: Note,
+struct Note<T> {
+    note: T,
 }
 
 #[derive(Serialize, Debug)]
@@ -59,11 +60,19 @@ struct CreateDeck {
 
 #[derive(Serialize, Debug)]
 #[serde(rename_all = "camelCase")]
-struct Note {
+struct AddNote {
     deck_name: String,
     model_name: String,
     fields: HashMap<String, String>,
     options: Options,
+    tags: Vec<String>,
+}
+
+#[derive(Serialize, Debug)]
+#[serde(rename_all = "camelCase")]
+struct UpdateNode {
+    id: NoteId,
+    fields: HashMap<String, String>,
     tags: Vec<String>,
 }
 
@@ -86,8 +95,9 @@ struct Response<T> {
     error: Option<String>,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug)]
 #[serde(transparent)]
+/// Contains a Unix Timestamp (so 13 decimal digits for the years 2001-2286)
 pub struct NoteId(pub u64);
 
 pub async fn add_cloze_note(
@@ -97,24 +107,46 @@ pub async fn add_cloze_note(
 ) -> Result<NoteId, String> {
     ensure_deck_exists(client).await?;
 
+    let note = AddNote {
+        deck_name: DECK.to_string(),
+        model_name: "Cloze".to_string(),
+        fields: HashMap::from([
+            ("Text".to_string(), text),
+            ("Back Extra".to_string(), String::new()),
+        ]),
+        options: Options {
+            allow_duplicate: false,
+            duplicate_scope: DuplicateScope::Deck,
+        },
+        tags,
+    };
     let request = Request {
         action: Action::AddNote,
         version: 6,
-        params: AddNote {
-            note: Note {
-                deck_name: DECK.to_string(),
-                model_name: "Cloze".to_string(),
-                fields: HashMap::from([
-                    ("Text".to_string(), text),
-                    ("Back Extra".to_string(), String::new()),
-                ]),
-                options: Options {
-                    allow_duplicate: false,
-                    duplicate_scope: DuplicateScope::Deck,
-                },
-                tags,
-            },
-        },
+        params: Note { note },
+    };
+
+    request.request(client).await
+}
+
+pub async fn update_cloze_note(
+    text: String,
+    id: NoteId,
+    tags: Vec<String>,
+    client: &reqwest::Client,
+) -> Result<NoteId, String> {
+    let note = UpdateNode {
+        fields: HashMap::from([
+            ("Text".to_string(), text),
+            ("Back Extra".to_string(), String::new()),
+        ]),
+        id,
+        tags,
+    };
+    let request = Request {
+        action: Action::AddNote,
+        version: 6,
+        params: Note { note },
     };
 
     request.request(client).await

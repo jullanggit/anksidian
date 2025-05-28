@@ -11,7 +11,7 @@ use std::{
     process::{Command, Stdio},
 };
 
-use anki::add_cloze_note;
+use anki::{NoteId, add_cloze_note, update_cloze_note};
 
 mod anki;
 
@@ -129,11 +129,30 @@ async fn handle_md(path: &Path, client: &reqwest::Client) -> io::Result<()> {
                 if in_cloze || math.is_some() {
                     current_text.push('\n');
                 } else {
-                    let text = mem::take(&mut current_text);
-                    if !text.is_empty() {
-                        clozes.push(text);
-                    }
                     num_cloze = 1;
+
+                    if !current_text.is_empty() {
+                        // get note id
+                        let format_note_id = |id: u64| format!("<!--NoteID:{id}-->");
+                        let mock_note_id = format_note_id(1000000000000);
+                        let end_offset = 1 + mock_note_id.len();
+
+                        if let Some((index, _)) = file_contents.char_indices().nth(i)
+                            && let Some(potential_id) = file_contents.get(index + 1..index + end_offset) // index + 1 to skip newline
+                            && potential_id[0..11] == mock_note_id[0..11]
+                            && potential_id[24..] == mock_note_id[24..]
+                        {
+                            let note_id: u64 = potential_id[11..24].parse().unwrap();
+                            update_cloze_note(
+                                mem::take(&mut current_text),
+                                NoteId(note_id),
+                                Vec::new(),
+                                client,
+                            )
+                            .await
+                            .unwrap();
+                        }
+                    }
 
                     if !skip_before_next_cloze(&file_contents, &mut i, &mut line) {
                         break;
