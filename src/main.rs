@@ -64,13 +64,23 @@ fn traverse(dir: PathBuf) -> io::Result<()> {
     Ok(())
 }
 
-fn format_to_anki(file_contents: &str) {
+#[derive(PartialEq, Clone, Copy)]
+enum Math {
+    Inline,
+    Display,
+}
+
+fn handle_md(path: &Path) -> io::Result<()> {
+    let file_contents = fs::read_to_string(path)?;
+
     let mut clozes = Vec::new(); // todo: handle ID
     let mut line = 0;
     let mut current_text = String::new();
+    let mut math_text = String::new();
     let mut in_cloze = false;
     let mut line_contains_cloze = false;
     let mut num_cloze = 1;
+    let mut math = None;
 
     // init iter
     let mut i = 0;
@@ -100,9 +110,18 @@ fn format_to_anki(file_contents: &str) {
             false
         }
     };
-    if !skip_before_next_cloze(file_contents, &mut i, &mut line) {
-        return;
+    if !skip_before_next_cloze(&file_contents, &mut i, &mut line) {
+        return Ok(());
     };
+    let push_char =
+        |other: char, math: Option<Math>, math_text: &mut String, current_text: &mut String| {
+            if math.is_some() {
+                math_text
+            } else {
+                current_text
+            }
+            .push(other)
+        };
     loop {
         let Some(char_a) = file_contents.chars().nth(i) else {
             break;
@@ -111,7 +130,7 @@ fn format_to_anki(file_contents: &str) {
         match [char_a, char_b] {
             ['\n', _] => {
                 line += 1;
-                if in_cloze {
+                if in_cloze || math.is_some() {
                     current_text.push('\n');
                 } else {
                     if line_contains_cloze {
@@ -122,12 +141,12 @@ fn format_to_anki(file_contents: &str) {
                     line_contains_cloze = false;
                     num_cloze = 1;
 
-                    if !skip_before_next_cloze(file_contents, &mut i, &mut line) {
+                    if !skip_before_next_cloze(&file_contents, &mut i, &mut line) {
                         break;
                     }
                 }
             }
-            ['=', '='] => {
+            ['=', '='] if math.is_none() => {
                 line_contains_cloze = true;
 
                 if in_cloze {
@@ -143,96 +162,48 @@ fn format_to_anki(file_contents: &str) {
                 // skip second '='
                 i += 1;
             }
-            [other, _] => current_text.push(other),
+            ['$', '$'] => match math {
+                None => math = Some(Math::Display),
+                Some(math_type) => {
+                    math = None;
+                    let converted = convert_math(&mem::take(&mut math_text), math_type)?; // todo: adjust this fn
+                    current_text.push_str(&converted);
+                    if math_type == Math::Display {
+                        i += 1
+                    }
+                }
+            },
+            ['$', _] => match math {
+                None => math = Some(Math::Inline),
+                Some(Math::Inline) => {
+                    math = None;
+                    let converted = convert_math(&mem::take(&mut math_text), Math::Inline)?; // todo: adjust this fn
+                    current_text.push_str(&converted);
+                }
+                Some(Math::Display) => push_char('$', math, &mut math_text, &mut current_text),
+            },
+            [other, _] => push_char(other, math, &mut math_text, &mut current_text),
         }
         i += 1;
     }
     dbg!(clozes);
-}
-
-fn handle_md(file: &Path) -> io::Result<()> {
-    let contents = fs::read_to_string(file)?;
-    format_to_anki(&contents);
-    let converted_math = convert_math(&contents)?;
-    let removed_hyperlinks = converted_math.replace("[[", "").replace("]]", "");
-
-    let highlighted = get_surrounded(&removed_hyperlinks, "==", false)
-        .into_iter()
-        .map(|(start, end)| SubStrWithSurroundingNewlines {
-            sub_str: removed_hyperlinks[start..end].to_string(),
-            previous_newline: removed_hyperlinks[0..start].rfind('\n').unwrap_or(0),
-            start,
-            end,
-            next_newline: removed_hyperlinks[end..]
-                .find('\n')
-                .map_or(removed_hyperlinks.len(), |offset| end + offset),
-        });
-
-    let converted_math = highlighted.into_iter().map(|mut str_w_nl| {
-        // remove hyperlink brackets
-        str_w_nl.sub_str = convert_math(&str_w_nl.sub_str).unwrap();
-        str_w_nl
-    });
-
-    for string in converted_math {
-        let anki_formatted = format!(
-            "{}{{{{c1::{}}}}}{}",
-            &removed_hyperlinks[string.previous_newline + 1..string.start],
-            string.sub_str,
-            &removed_hyperlinks[string.end..string.next_newline]
-        );
-        let removed_highlights = anki_formatted.replace("==", "");
-    }
-
     Ok(())
 }
 
-/// Get substrings surrounded by delimiter
-fn get_surrounded(string: &str, delimiter: &str, with_delimiter: bool) -> Vec<(usize, usize)> {
-    let mut pos = 0;
-    let mut results = Vec::new();
-
-    while let Some(Some(offset)) = string.get(pos..).map(|str| str.find(delimiter)) {
-        let start = pos + offset + delimiter.len();
-
-        if let Some(offset) = string[start..].find(delimiter) {
-            let end = start + offset;
-            pos = end + delimiter.len();
-
-            results.push(if with_delimiter {
-                (start - delimiter.len(), end + delimiter.len())
-            } else {
-                (start, end)
-            });
-        } else {
-            break;
-        }
-    }
-
-    results
-}
-
 /// Convert from Obsidian latex/typst to anki latex
-fn convert_math(str: &str) -> io::Result<String> {
-    let mut string = str.to_string();
-    let maths = get_surrounded(str, "$", true);
-
-    for (start, end) in maths {
-        let math = &str[start..end];
-
-        let replace = if is_typst(math)? {
-            typst_to_latex(math)?
-        } else {
-            let mut temp = String::from("\\(");
-            temp.push_str(&math[1..math.len() - 1]);
-            temp.push_str("\\)");
-            temp
-        };
-
-        string = string.replace(math, &replace);
+fn convert_math(str: &str, math_type: Math) -> io::Result<String> {
+    let typst_style_math = match math_type {
+        Math::Inline => format!("${str}$"),
+        Math::Display => format!("$ {str} $"),
+    };
+    if is_typst(&typst_style_math)? {
+        typst_to_latex(&typst_style_math)
+    } else {
+        Ok(match math_type {
+            Math::Inline => format!("\\({str}\\)"),
+            Math::Display => format!("\\[{str}\\]"),
+        })
     }
-
-    Ok(string)
 }
 
 fn is_typst(math: &str) -> io::Result<bool> {
