@@ -155,7 +155,10 @@ async fn handle_md(path: &Path, client: &reqwest::Client) -> io::Result<()> {
                 i += 1;
             }
             [Some('$'), Some('$')] => match math {
-                None => math = Some(Math::Display),
+                None => {
+                    math = Some(Math::Display);
+                    i += 1
+                }
                 Some(math_type) => {
                     math = None;
                     let converted = convert_math(&mem::take(&mut math_text), math_type)?; // todo: adjust this fn

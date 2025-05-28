@@ -22,7 +22,7 @@ impl<P: Serialize> Request<P> {
             .json(&self)
             .send()
             .await
-            .unwrap();
+            .expect("AnkiConnect should be reachable");
 
         if response.status().is_success() {
             let response: Response<R> = response.json().await.unwrap();

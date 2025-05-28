@@ -33,7 +33,6 @@ Supported are:
 ```
 
 ## TODO
-- fix multiline
 - track note id
 
 
