@@ -23,7 +23,7 @@ const TEST_MD: &str = "## Definition
 ## Random Latex
 ==$\\frac{3}{\\pi}$==
 ## Mixed
-==Idkman $gamma$ me neither==";
+==Idkman $$gamma$$ me neither==";
 
 #[derive(Debug)]
 struct SubStrWithSurroundingNewlines {
@@ -78,11 +78,9 @@ fn handle_md(path: &Path) -> io::Result<()> {
     let mut current_text = String::new();
     let mut math_text = String::new();
     let mut in_cloze = false;
-    let mut line_contains_cloze = false;
     let mut num_cloze = 1;
     let mut math = None;
 
-    // init iter
     let mut i = 0;
     // skip to the newline before the next cloze
     let skip_before_next_cloze = |file_contents: &str, i: &mut usize, line: &mut usize| {
@@ -92,7 +90,7 @@ fn handle_md(path: &Path) -> io::Result<()> {
             .map_windows(|chars| *chars == ['='; 2])
             .position(identity)
         {
-            let (newline_before_offset, (newlines_skipped, _)) = file_contents
+            let (newlines_skipped, (newline_before_offset, _)) = file_contents
                 .chars()
                 .skip(*i)
                 .take(next_cloze_offset)
@@ -113,6 +111,7 @@ fn handle_md(path: &Path) -> io::Result<()> {
     if !skip_before_next_cloze(&file_contents, &mut i, &mut line) {
         return Ok(());
     };
+    // push the character to current/math text, based on math
     let push_char =
         |other: char, math: Option<Math>, math_text: &mut String, current_text: &mut String| {
             if math.is_some() {
@@ -123,22 +122,18 @@ fn handle_md(path: &Path) -> io::Result<()> {
             .push(other)
         };
     loop {
-        let Some(char_a) = file_contents.chars().nth(i) else {
-            break;
-        };
-        let char_b = file_contents.chars().nth(i + 1).unwrap_or_default();
+        let char_a = file_contents.chars().nth(i);
+        let char_b = file_contents.chars().nth(i + 1);
         match [char_a, char_b] {
-            ['\n', _] => {
+            [Some('\n'), _] | [None, _] => {
                 line += 1;
                 if in_cloze || math.is_some() {
                     current_text.push('\n');
                 } else {
-                    if line_contains_cloze {
-                        clozes.push(mem::take(&mut current_text));
-                    } else {
-                        current_text.clear();
+                    let text = mem::take(&mut current_text);
+                    if !text.is_empty() {
+                        clozes.push(text);
                     }
-                    line_contains_cloze = false;
                     num_cloze = 1;
 
                     if !skip_before_next_cloze(&file_contents, &mut i, &mut line) {
@@ -146,9 +141,7 @@ fn handle_md(path: &Path) -> io::Result<()> {
                     }
                 }
             }
-            ['=', '='] if math.is_none() => {
-                line_contains_cloze = true;
-
+            [Some('='), Some('=')] if math.is_none() => {
                 if in_cloze {
                     current_text.push_str("}}");
                 } else {
@@ -162,7 +155,7 @@ fn handle_md(path: &Path) -> io::Result<()> {
                 // skip second '='
                 i += 1;
             }
-            ['$', '$'] => match math {
+            [Some('$'), Some('$')] => match math {
                 None => math = Some(Math::Display),
                 Some(math_type) => {
                     math = None;
@@ -173,7 +166,7 @@ fn handle_md(path: &Path) -> io::Result<()> {
                     }
                 }
             },
-            ['$', _] => match math {
+            [Some('$'), _] => match math {
                 None => math = Some(Math::Inline),
                 Some(Math::Inline) => {
                     math = None;
@@ -182,7 +175,7 @@ fn handle_md(path: &Path) -> io::Result<()> {
                 }
                 Some(Math::Display) => push_char('$', math, &mut math_text, &mut current_text),
             },
-            [other, _] => push_char(other, math, &mut math_text, &mut current_text),
+            [Some(other), _] => push_char(other, math, &mut math_text, &mut current_text),
         }
         i += 1;
     }
