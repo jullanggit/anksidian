@@ -174,6 +174,7 @@ async fn handle_md(path: &Path, client: &reqwest::Client) -> io::Result<()> {
                 }
                 Some(Math::Display) => push_char('$', math, &mut math_text, &mut current_text),
             },
+            [Some('['), Some('[')] | [Some(']'), Some(']')] if math.is_none() => i += 1,
             [Some(other), _] => push_char(other, math, &mut math_text, &mut current_text),
         }
         i += 1;

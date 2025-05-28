@@ -1,8 +1,5 @@
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
-use std::{
-    cell::{LazyCell, OnceCell},
-    collections::HashMap,
-};
+use std::collections::HashMap;
 
 // Handles interaction with AnkiConnect.
 // Could maybe use a bit more type-safety, stuff like action <-> params,

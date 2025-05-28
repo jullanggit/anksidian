@@ -16,6 +16,7 @@ Supported are:
   - language
     - typst
     - latex
+- Obsidian-style hyperlinks (just get removed)
 
 ## Example
 ```file.md
