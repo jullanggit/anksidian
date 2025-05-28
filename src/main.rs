@@ -70,9 +70,9 @@ enum Math {
 }
 
 async fn handle_md(path: &Path, client: &reqwest::Client) -> io::Result<()> {
-    let file_contents = fs::read_to_string(path)?;
+    let mut file_contents = fs::read_to_string(path)?;
+    let mut changed = false;
 
-    let mut clozes = Vec::new(); // todo: handle ID
     let mut line = 0;
     let mut current_text = String::new();
     let mut math_text = String::new();
@@ -132,15 +132,17 @@ async fn handle_md(path: &Path, client: &reqwest::Client) -> io::Result<()> {
                     num_cloze = 1;
 
                     if !current_text.is_empty() {
-                        // get note id
+                        // handle note id
                         let format_note_id = |id: u64| format!("<!--NoteID:{id}-->");
                         let mock_note_id = format_note_id(1000000000000);
                         let end_offset = 1 + mock_note_id.len();
 
-                        if let Some((index, _)) = file_contents.char_indices().nth(i)
+                        let index = file_contents.char_indices().nth(i);
+                        if let Some((index, _)) = index
                             && let Some(potential_id) = file_contents.get(index + 1..index + end_offset) // index + 1 to skip newline
                             && potential_id[0..11] == mock_note_id[0..11]
                             && potential_id[24..] == mock_note_id[24..]
+                        // update existing note
                         {
                             let note_id: u64 = potential_id[11..24].parse().unwrap();
                             update_cloze_note(
@@ -151,7 +153,22 @@ async fn handle_md(path: &Path, client: &reqwest::Client) -> io::Result<()> {
                             )
                             .await
                             .unwrap();
+                        // add new note
+                        } else {
+                            let note_id =
+                                add_cloze_note(mem::take(&mut current_text), Vec::new(), client)
+                                    .await
+                                    .unwrap();
+
+                            file_contents.insert_str(
+                                index.map_or(file_contents.len(), |index| index.0),
+                                &format_note_id(note_id.0),
+                            );
+
+                            changed = true;
                         }
+
+                        i += end_offset;
                     }
 
                     if !skip_before_next_cloze(&file_contents, &mut i, &mut line) {
@@ -201,13 +218,11 @@ async fn handle_md(path: &Path, client: &reqwest::Client) -> io::Result<()> {
         }
         i += 1;
     }
-    // todo: remove this
-    {
-        for cloze in clozes {
-            dbg!(add_cloze_note(cloze, Vec::new(), client).await);
-        }
+    if changed {
+        fs::write(path, file_contents)
+    } else {
+        Ok(())
     }
-    Ok(())
 }
 
 /// Convert from Obsidian latex/typst to anki latex
