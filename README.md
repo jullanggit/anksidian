@@ -7,6 +7,7 @@ That being said, here's an outline of the mentioned use-case:
 - Setup AnkiConnect
 - Have Anki open
 - Run the cli in a directory with Markdown files
+- Anksidian will add the clozes to anki and insert html-comments with their note ids below
 Supported are:
 - Multi-line flashcards
 - Math blocks
@@ -33,7 +34,6 @@ Supported are:
 ```
 
 ## TODO
-- track note id
-
+- hash files
 
 ![](https://brainmade.org/black-logo.svg)

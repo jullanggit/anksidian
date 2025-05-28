@@ -17,28 +17,10 @@ mod anki;
 
 const IGNORE_PATHS: [&str; 1] = ["./Excalidraw"];
 
-const TEST_MD: &str = r"# Thermal expansion
-## Definition
-- Change of ==[[volume]]/length== in response to ==change of
-[[temperature]]==
-## Formula
-==$$Delta V/L = V/L dot gamma/alpha dot Delta T$$==
-## Coefficients
-==$gamma$== = ==linear==, ==$alpha$== = ==volumetric coefficient==
-### Unit
-==$\left\lbrack \frac \gamma \alpha \right\rbrack = 1K^{-1}\$==
-";
-
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
-    // TODO: remove
-    {
-        let client = reqwest::Client::new();
-        fs::write("/tmp/test", TEST_MD);
-        handle_md(&PathBuf::from("/tmp/test"), &client)
-            .await
-            .unwrap();
-    }
+    let client = reqwest::Client::new();
+    traverse(PathBuf::from("."), &client).await.unwrap();
 }
 
 async fn traverse(dir: PathBuf, client: &reqwest::Client) -> io::Result<()> {
@@ -133,18 +115,17 @@ async fn handle_md(path: &Path, client: &reqwest::Client) -> io::Result<()> {
 
                     if !current_text.is_empty() {
                         // handle note id
-                        let format_note_id = |id: u64| format!("<!--NoteID:{id}-->");
+                        let format_note_id = |id: u64| format!("\n<!--NoteID:{id}-->");
                         let mock_note_id = format_note_id(1000000000000);
-                        let end_offset = 1 + mock_note_id.len();
 
                         let index = file_contents.char_indices().nth(i);
                         if let Some((index, _)) = index
-                            && let Some(potential_id) = file_contents.get(index + 1..index + end_offset) // index + 1 to skip newline
-                            && potential_id[0..11] == mock_note_id[0..11]
-                            && potential_id[24..] == mock_note_id[24..]
+                            && let Some(potential_id) = file_contents.get(index..index + mock_note_id.len()) // index + 1 to skip newline
+                            && potential_id[0..12] == mock_note_id[0..12]
+                            && potential_id[25..] == mock_note_id[25..]
                         // update existing note
                         {
-                            let note_id: u64 = potential_id[11..24].parse().unwrap();
+                            let note_id: u64 = potential_id[12..25].parse().unwrap();
                             update_cloze_note(
                                 mem::take(&mut current_text),
                                 NoteId(note_id),
@@ -168,7 +149,7 @@ async fn handle_md(path: &Path, client: &reqwest::Client) -> io::Result<()> {
                             changed = true;
                         }
 
-                        i += end_offset;
+                        i += mock_note_id.len();
                     }
 
                     if !skip_before_next_cloze(&file_contents, &mut i, &mut line) {
@@ -197,7 +178,7 @@ async fn handle_md(path: &Path, client: &reqwest::Client) -> io::Result<()> {
                 }
                 Some(math_type) => {
                     math = None;
-                    let converted = convert_math(&mem::take(&mut math_text), math_type)?; // todo: adjust this fn
+                    let converted = convert_math(&mem::take(&mut math_text), math_type)?;
                     current_text.push_str(&converted);
                     if math_type == Math::Display {
                         i += 1
@@ -208,7 +189,7 @@ async fn handle_md(path: &Path, client: &reqwest::Client) -> io::Result<()> {
                 None => math = Some(Math::Inline),
                 Some(Math::Inline) => {
                     math = None;
-                    let converted = convert_math(&mem::take(&mut math_text), Math::Inline)?; // todo: adjust this fn
+                    let converted = convert_math(&mem::take(&mut math_text), Math::Inline)?;
                     current_text.push_str(&converted);
                 }
                 Some(Math::Display) => push_char('$', math, &mut math_text, &mut current_text),

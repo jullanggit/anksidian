@@ -29,8 +29,8 @@ impl<P: Serialize> Request<P> {
             match (response.result, response.error) {
                 (Some(result), None) => Ok(result),
                 (None, Some(error)) => Err(error),
-                (Some(_), Some(_)) => unreachable!("Both error and result"),
-                (None, None) => unreachable!("Neither error nor result"),
+                (Some(_), Some(_)) => Err("Both error and result".to_string()),
+                (None, None) => Err("Neither error nor result".to_string()),
             }
         } else {
             Err(format!("Error: Status: {}", response.status()))
@@ -43,7 +43,7 @@ impl<P: Serialize> Request<P> {
 enum Action {
     AddNote,
     CreateDeck,
-    UpdateNodeFields,
+    UpdateNoteFields,
 }
 
 #[derive(Serialize, Debug)]
@@ -134,7 +134,7 @@ pub async fn update_cloze_note(
     id: NoteId,
     tags: Vec<String>,
     client: &reqwest::Client,
-) -> Result<NoteId, String> {
+) -> Result<(), String> {
     let note = UpdateNode {
         fields: HashMap::from([
             ("Text".to_string(), text),
@@ -144,12 +144,16 @@ pub async fn update_cloze_note(
         tags,
     };
     let request = Request {
-        action: Action::AddNote,
+        action: Action::UpdateNoteFields,
         version: 6,
         params: Note { note },
     };
 
-    request.request(client).await
+    match request.request(client).await {
+        // return null, null on success
+        Err(string) if &string == "Neither error nor result" => Ok(()),
+        other => other,
+    }
 }
 
 /// Ensures that the deck `DECK` exists
