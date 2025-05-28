@@ -17,18 +17,17 @@ mod anki;
 
 const IGNORE_PATHS: [&str; 1] = ["./Excalidraw"];
 
-const TEST_MD: &str = "## Definition
-- Veränderung des Volumens/Länge bei Temperaturveränderung
-## Formel
-==$Delta V/L = V/L dot gamma/alpha dot Delta T$==
-## Koeffizienten
-==$gamma$== = ==Raum-==, ==$alpha$== = ==Längenausdehnungskoeffizient==
-### Einheit
-==$[gamma/alpha] = 1K^(-1)$==
-## Random Latex
-==$\\frac{3}{\\pi}$==
-## Mixed
-==Idkman $$gamma$$ me neither==";
+const TEST_MD: &str = r"# Thermal expansion
+## Definition
+- Change of ==[[volume]]/length== in response to ==change of
+[[temperature]]==
+## Formula
+==$$Delta V/L = V/L dot gamma/alpha dot Delta T$$==
+## Coefficients
+==$gamma$== = ==linear==, ==$alpha$== = ==volumetric coefficient==
+### Unit
+==$\left\lbrack \frac \gamma \alpha \right\rbrack = 1K^{-1}\$==
+";
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
