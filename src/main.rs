@@ -1,18 +1,14 @@
 #![feature(exit_status_error)]
 
 use std::{
-    borrow::Cow,
     fs,
     io::{self, Write},
+    mem,
     path::{Path, PathBuf},
     process::{Command, Stdio},
 };
 
-use reqwest::Client;
-
-struct Config {
-    ignore_paths: Vec<PathBuf>,
-}
+const IGNORE_PATHS: [&str; 1] = ["./Excalidraw"];
 
 const TEST_MD: &str = "## Definition
 - Veränderung des Volumens/Länge bei Temperaturveränderung
@@ -44,12 +40,16 @@ fn main() {
     }
 }
 
-fn traverse(dir: PathBuf, config: &Config) -> io::Result<()> {
+fn traverse(dir: PathBuf) -> io::Result<()> {
     for entry in dir.read_dir()?.flatten() {
         let path = entry.path();
         // recurse
-        if path.is_dir() && !config.ignore_paths.contains(&path) {
-            traverse(path, config)?;
+        if path.is_dir()
+            && !IGNORE_PATHS
+                .map(AsRef::<Path>::as_ref)
+                .contains(&path.as_path())
+        {
+            traverse(path)?;
         // markdown file
         } else if path.is_file()
             && let Some(extension) = path.extension()
@@ -60,6 +60,62 @@ fn traverse(dir: PathBuf, config: &Config) -> io::Result<()> {
     }
 
     Ok(())
+}
+
+fn format_to_anki(file_contents: &str) {
+    let mut clozes = Vec::new(); // todo: handle ID
+    let mut line = 0;
+    let mut current_text = String::new();
+    let mut in_cloze = false;
+    let mut line_contains_cloze = false;
+    let mut num_cloze = 1;
+
+    // init iter
+    let mut iter = file_contents.chars();
+    let mut end = false;
+    let mut chars = ['\0', iter.next().unwrap()];
+    let mut update = |chars: &mut [char; 2], end: &mut bool| {
+        chars[0] = chars[1];
+        chars[1] = iter.next().unwrap_or_else(|| {
+            *end = true;
+            '\0'
+        });
+    };
+    while !end {
+        update(&mut chars, &mut end);
+        match chars {
+            ['\n', _] => {
+                line += 1;
+                if in_cloze {
+                    current_text.push('\n');
+                } else {
+                    if line_contains_cloze {
+                        clozes.push(mem::take(&mut current_text));
+                    } else {
+                        current_text.clear();
+                    }
+                    num_cloze = 1;
+                }
+            }
+            ['=', '='] => {
+                line_contains_cloze = true;
+
+                if in_cloze {
+                    current_text.push_str("}}");
+                } else {
+                    current_text.push_str(&format!("{{c{num_cloze}::")); // could be done without an allocation
+                    num_cloze += 1;
+                }
+
+                // toggle in_cloze
+                in_cloze = !in_cloze;
+
+                // skip second =
+                update(&mut chars, &mut end);
+            }
+            [other, _] => current_text.push(other),
+        }
+    }
 }
 
 fn handle_md(file: &Path) -> io::Result<()> {
