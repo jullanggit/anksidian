@@ -1,11 +1,14 @@
 #![feature(exit_status_error)]
+#![feature(iter_map_windows)]
 
 use std::{
+    convert::identity,
     fs,
     io::{self, Write},
     mem,
     path::{Path, PathBuf},
     process::{Command, Stdio},
+    usize,
 };
 
 const IGNORE_PATHS: [&str; 1] = ["./Excalidraw"];
@@ -63,6 +66,8 @@ fn traverse(dir: PathBuf) -> io::Result<()> {
 }
 
 fn format_to_anki(file_contents: &str) {
+    let num_chars = file_contents.chars().count();
+
     let mut clozes = Vec::new(); // todo: handle ID
     let mut line = 0;
     let mut current_text = String::new();
@@ -71,19 +76,13 @@ fn format_to_anki(file_contents: &str) {
     let mut num_cloze = 1;
 
     // init iter
-    let mut iter = file_contents.chars();
-    let mut end = false;
-    let mut chars = ['\0', iter.next().unwrap()];
-    let mut update = |chars: &mut [char; 2], end: &mut bool| {
-        chars[0] = chars[1];
-        chars[1] = iter.next().unwrap_or_else(|| {
-            *end = true;
-            '\0'
-        });
-    };
-    while !end {
-        update(&mut chars, &mut end);
-        match chars {
+    let mut i = 0;
+    loop {
+        let Some(char_a) = file_contents.chars().nth(i) else {
+            break;
+        };
+        let char_b = file_contents.chars().nth(i).unwrap_or_default();
+        match [char_a, char_b] {
             ['\n', _] => {
                 line += 1;
                 if in_cloze {
@@ -94,7 +93,31 @@ fn format_to_anki(file_contents: &str) {
                     } else {
                         current_text.clear();
                     }
+                    line_contains_cloze = false;
                     num_cloze = 1;
+
+                    // skip to the newline before the next cloze
+                    if let Some(next_cloze_offset) = file_contents
+                        .chars()
+                        .skip(i)
+                        .map_windows(|chars| *chars == ['='; 2])
+                        .position(identity)
+                    {
+                        let (newline_before_offset, (newlines_skipped, _)) = file_contents
+                            .chars()
+                            .skip(i)
+                            .take(next_cloze_offset)
+                            .enumerate()
+                            .filter(|(_, char)| *char == '\n')
+                            .enumerate()
+                            .last()
+                            .expect("Should always match at least i");
+                        i += newline_before_offset;
+                        line += newlines_skipped;
+                    // No more clozes in the file
+                    } else {
+                        break;
+                    }
                 }
             }
             ['=', '='] => {
@@ -110,11 +133,12 @@ fn format_to_anki(file_contents: &str) {
                 // toggle in_cloze
                 in_cloze = !in_cloze;
 
-                // skip second =
-                update(&mut chars, &mut end);
+                // skip second '='
+                i += 1;
             }
             [other, _] => current_text.push(other),
         }
+        i += 1;
     }
 }
 
