@@ -61,7 +61,6 @@ async fn handle_md(path: &Path, client: &reqwest::Client) -> io::Result<()> {
         .collect::<Vec<char>>();
     let mut changed = false;
 
-    let mut line = 0;
     let mut current_text = String::new();
     let mut math_text = String::new();
     let mut in_cloze = false;
@@ -70,21 +69,16 @@ async fn handle_md(path: &Path, client: &reqwest::Client) -> io::Result<()> {
 
     let mut i = 0;
     // skip to the newline before the next cloze
-    let skip_before_next_cloze = |file_contents: &[char], i: &mut usize, line: &mut usize| {
+    let skip_before_next_cloze = |file_contents: &[char], i: &mut usize| {
         if let Some(next_cloze_offset) = file_contents[*i..]
             .array_windows()
             .position(|chars| chars == &['='; 2])
         {
-            let (newlines_skipped, (newline_before_offset, _)) = file_contents
-                [*i..*i + next_cloze_offset]
+            let newline_before_offset = file_contents[*i..*i + next_cloze_offset]
                 .iter()
-                .enumerate()
-                .filter(|(_, char)| **char == '\n')
-                .enumerate()
-                .last()
-                .unwrap_or((0, (0, &'\0')));
+                .rposition(|char| *char == '\n')
+                .unwrap_or(0);
             *i += newline_before_offset;
-            *line += newlines_skipped;
 
             true
         // No more clozes in the file
@@ -92,7 +86,7 @@ async fn handle_md(path: &Path, client: &reqwest::Client) -> io::Result<()> {
             false
         }
     };
-    if !skip_before_next_cloze(&file_contents, &mut i, &mut line) {
+    if !skip_before_next_cloze(&file_contents, &mut i) {
         return Ok(());
     };
     // push the character to current/math text, based on math
@@ -106,11 +100,10 @@ async fn handle_md(path: &Path, client: &reqwest::Client) -> io::Result<()> {
             .push(other)
         };
     loop {
-        let char_a = file_contents.get(i);
-        let char_b = file_contents.get(i + 1);
+        let char_a = file_contents.get(i).cloned();
+        let char_b = file_contents.get(i + 1).cloned();
         match [char_a, char_b] {
             [Some('\n'), _] | [None, _] => {
-                line += 1;
                 if in_cloze || math.is_some() {
                     current_text.push('\n');
 
@@ -168,7 +161,7 @@ async fn handle_md(path: &Path, client: &reqwest::Client) -> io::Result<()> {
                         }
                     }
 
-                    if !skip_before_next_cloze(&file_contents, &mut i, &mut line) {
+                    if char_a.is_none() || !skip_before_next_cloze(&file_contents, &mut i) {
                         break;
                     }
                 }
@@ -211,7 +204,7 @@ async fn handle_md(path: &Path, client: &reqwest::Client) -> io::Result<()> {
                 Some(Math::Display) => push_char('$', math, &mut math_text, &mut current_text),
             },
             [Some('['), Some('[')] | [Some(']'), Some(']')] if math.is_none() => i += 1,
-            [Some(other), _] => push_char(*other, math, &mut math_text, &mut current_text),
+            [Some(other), _] => push_char(other, math, &mut math_text, &mut current_text),
         }
         i += 1;
     }
