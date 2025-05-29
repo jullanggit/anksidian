@@ -114,6 +114,12 @@ async fn handle_md(path: &Path, client: &reqwest::Client) -> io::Result<()> {
                 line += 1;
                 if in_cloze || math.is_some() {
                     current_text.push('\n');
+
+                    // prevent infinite loop
+                    if char_a.is_none() {
+                        in_cloze = false;
+                        math = None;
+                    }
                 } else {
                     num_cloze = 1;
 
