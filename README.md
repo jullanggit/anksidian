@@ -34,6 +34,7 @@ Supported are:
 ```
 
 ## TODO
+- add file/header path
 - hash files
 
 ![](https://brainmade.org/black-logo.svg)
