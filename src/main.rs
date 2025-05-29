@@ -1,9 +1,9 @@
 #![feature(exit_status_error)]
-#![feature(iter_map_windows)]
+#![feature(array_windows)]
 #![feature(default_field_values)]
+#![feature(string_into_chars)]
 
 use std::{
-    convert::identity,
     fs,
     io::{self, Write},
     mem,
@@ -52,7 +52,9 @@ enum Math {
 }
 
 async fn handle_md(path: &Path, client: &reqwest::Client) -> io::Result<()> {
-    let mut file_contents = fs::read_to_string(path)?;
+    let mut file_contents = fs::read_to_string(path)?
+        .into_chars()
+        .collect::<Vec<char>>();
     let mut changed = false;
 
     let mut line = 0;
@@ -64,22 +66,19 @@ async fn handle_md(path: &Path, client: &reqwest::Client) -> io::Result<()> {
 
     let mut i = 0;
     // skip to the newline before the next cloze
-    let skip_before_next_cloze = |file_contents: &str, i: &mut usize, line: &mut usize| {
-        if let Some(next_cloze_offset) = file_contents
-            .chars()
-            .skip(*i)
-            .map_windows(|chars| *chars == ['='; 2])
-            .position(identity)
+    let skip_before_next_cloze = |file_contents: &[char], i: &mut usize, line: &mut usize| {
+        if let Some(next_cloze_offset) = file_contents[*i..]
+            .array_windows()
+            .position(|chars| chars == &['='; 2])
         {
             let (newlines_skipped, (newline_before_offset, _)) = file_contents
-                .chars()
-                .skip(*i)
-                .take(next_cloze_offset)
+                [*i..*i + next_cloze_offset]
+                .iter()
                 .enumerate()
-                .filter(|(_, char)| *char == '\n')
+                .filter(|(_, char)| **char == '\n')
                 .enumerate()
                 .last()
-                .unwrap_or_default();
+                .unwrap_or((0, (0, &'\0')));
             *i += newline_before_offset;
             *line += newlines_skipped;
 
@@ -103,8 +102,8 @@ async fn handle_md(path: &Path, client: &reqwest::Client) -> io::Result<()> {
             .push(other)
         };
     loop {
-        let char_a = file_contents.chars().nth(i);
-        let char_b = file_contents.chars().nth(i + 1);
+        let char_a = file_contents.get(i);
+        let char_b = file_contents.get(i + 1);
         match [char_a, char_b] {
             [Some('\n'), _] | [None, _] => {
                 line += 1;
@@ -115,17 +114,20 @@ async fn handle_md(path: &Path, client: &reqwest::Client) -> io::Result<()> {
 
                     if !current_text.is_empty() {
                         // handle note id
-                        let format_note_id = |id: u64| format!("\n<!--NoteID:{id}-->");
-                        let mock_note_id = format_note_id(1000000000000);
+                        let format_note_id =
+                            |id: u64| format!("\n<!--NoteID:{id}-->").into_chars().collect();
+                        let mock_note_id: Vec<char> = format_note_id(1000000000000);
 
-                        let index = file_contents.char_indices().nth(i);
-                        if let Some((index, _)) = index
-                            && let Some(potential_id) = file_contents.get(index..index + mock_note_id.len()) // index + 1 to skip newline
+                        if let Some(potential_id) = file_contents.get(i..i + mock_note_id.len()) // index + 1 to skip newline
                             && potential_id[0..12] == mock_note_id[0..12]
                             && potential_id[25..] == mock_note_id[25..]
                         // update existing note
                         {
-                            let note_id: u64 = potential_id[12..25].parse().unwrap();
+                            let note_id: u64 = potential_id[12..25]
+                                .iter()
+                                .collect::<String>()
+                                .parse()
+                                .unwrap();
                             update_cloze_note(
                                 mem::take(&mut current_text),
                                 NoteId(note_id),
@@ -141,10 +143,8 @@ async fn handle_md(path: &Path, client: &reqwest::Client) -> io::Result<()> {
                                     .await
                                     .unwrap();
 
-                            file_contents.insert_str(
-                                index.map_or(file_contents.len(), |index| index.0),
-                                &format_note_id(note_id.0),
-                            );
+                            let index = i.min(file_contents.len());
+                            file_contents.splice(index..index, format_note_id(note_id.0));
 
                             changed = true;
                         }
@@ -195,12 +195,12 @@ async fn handle_md(path: &Path, client: &reqwest::Client) -> io::Result<()> {
                 Some(Math::Display) => push_char('$', math, &mut math_text, &mut current_text),
             },
             [Some('['), Some('[')] | [Some(']'), Some(']')] if math.is_none() => i += 1,
-            [Some(other), _] => push_char(other, math, &mut math_text, &mut current_text),
+            [Some(other), _] => push_char(*other, math, &mut math_text, &mut current_text),
         }
         i += 1;
     }
     if changed {
-        fs::write(path, file_contents)
+        fs::write(path, file_contents.into_iter().collect::<String>())
     } else {
         Ok(())
     }
