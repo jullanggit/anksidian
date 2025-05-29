@@ -5,14 +5,15 @@
 
 use std::{
     fs,
-    io::{self, Write},
+    io::{self},
     mem,
     path::{Path, PathBuf},
-    process::{Command, Stdio},
+    process::Stdio,
 };
 
 use anki::{NoteId, add_cloze_note, update_cloze_note};
 use log::{debug, trace};
+use tokio::{io::AsyncWriteExt, process::Command};
 
 mod anki;
 
@@ -182,7 +183,7 @@ async fn handle_md(path: &Path, client: &reqwest::Client) -> io::Result<()> {
                 }
                 Some(math_type) => {
                     math = None;
-                    let converted = convert_math(&mem::take(&mut math_text), math_type)?;
+                    let converted = convert_math(&mem::take(&mut math_text), math_type).await?;
                     current_text.push_str(&converted);
                     if math_type == Math::Display {
                         i += 1
@@ -193,7 +194,7 @@ async fn handle_md(path: &Path, client: &reqwest::Client) -> io::Result<()> {
                 None => math = Some(Math::Inline),
                 Some(Math::Inline) => {
                     math = None;
-                    let converted = convert_math(&mem::take(&mut math_text), Math::Inline)?;
+                    let converted = convert_math(&mem::take(&mut math_text), Math::Inline).await?;
                     current_text.push_str(&converted);
                 }
                 Some(Math::Display) => push_char('$', math, &mut math_text, &mut current_text),
@@ -211,13 +212,13 @@ async fn handle_md(path: &Path, client: &reqwest::Client) -> io::Result<()> {
 }
 
 /// Convert from Obsidian latex/typst to anki latex
-fn convert_math(str: &str, math_type: Math) -> io::Result<String> {
+async fn convert_math(str: &str, math_type: Math) -> io::Result<String> {
     let typst_style_math = match math_type {
         Math::Inline => format!("${str}$"),
         Math::Display => format!("$ {str} $"),
     };
-    if is_typst(&typst_style_math)? {
-        typst_to_latex(&typst_style_math)
+    if is_typst(&typst_style_math).await? {
+        typst_to_latex(&typst_style_math).await
     } else {
         Ok(match math_type {
             Math::Inline => format!("\\({str}\\)"),
@@ -226,7 +227,7 @@ fn convert_math(str: &str, math_type: Math) -> io::Result<String> {
     }
 }
 
-fn is_typst(math: &str) -> io::Result<bool> {
+async fn is_typst(math: &str) -> io::Result<bool> {
     // spawn typst compiler
     let mut child = Command::new("typst")
         .args(["c", "-", "-f", "pdf", "/dev/null"])
@@ -240,13 +241,14 @@ fn is_typst(math: &str) -> io::Result<bool> {
         .stdin
         .take()
         .expect("stdin is piped")
-        .write_all(math.as_bytes())?;
+        .write_all(math.as_bytes())
+        .await?;
 
     // success -> true
-    Ok(child.wait()?.code() == Some(0))
+    Ok(child.wait().await?.code() == Some(0))
 }
 
-fn typst_to_latex(typst: &str) -> io::Result<String> {
+async fn typst_to_latex(typst: &str) -> io::Result<String> {
     let mut child = Command::new("pandoc")
         .args(["-f", "typst", "-t", "latex"])
         .stdin(Stdio::piped())
@@ -258,10 +260,12 @@ fn typst_to_latex(typst: &str) -> io::Result<String> {
         .stdin
         .take()
         .expect("stdin is piped")
-        .write_all(typst.as_bytes())?;
+        .write_all(typst.as_bytes())
+        .await?;
 
     let mut stdout = child
-        .wait_with_output()?
+        .wait_with_output()
+        .await?
         .exit_ok()
         .map_err(io::Error::other)?
         .stdout;
