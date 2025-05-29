@@ -1,5 +1,6 @@
+use log::debug;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt::Debug};
 
 // Handles interaction with AnkiConnect.
 // Could maybe use a bit more type-safety, stuff like action <-> params,
@@ -10,13 +11,16 @@ const DECK: &str = "Obsidian";
 
 #[derive(Serialize, Debug)]
 #[serde(rename_all = "camelCase")]
-struct Request<P: Serialize> {
+struct Request<P: Serialize + Debug> {
     action: Action,
     version: u8,
     params: P,
 }
-impl<P: Serialize> Request<P> {
-    async fn request<R: DeserializeOwned>(&self, client: &reqwest::Client) -> Result<R, String> {
+impl<P: Serialize + Debug> Request<P> {
+    async fn request<R: DeserializeOwned + Debug>(
+        &self,
+        client: &reqwest::Client,
+    ) -> Result<R, String> {
         let response = client
             .post("http://localhost:8765")
             .json(&self)
@@ -24,7 +28,7 @@ impl<P: Serialize> Request<P> {
             .await
             .expect("AnkiConnect should be reachable");
 
-        if response.status().is_success() {
+        let response = if response.status().is_success() {
             let response: Response<R> = response.json().await.unwrap();
             match (response.result, response.error) {
                 (Some(result), None) => Ok(result),
@@ -34,7 +38,9 @@ impl<P: Serialize> Request<P> {
             }
         } else {
             Err(format!("Error: Status: {}", response.status()))
-        }
+        };
+        debug!("Got response {response:?} from AnkiConnect for request {self:?}");
+        response
     }
 }
 

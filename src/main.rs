@@ -12,6 +12,7 @@ use std::{
 };
 
 use anki::{NoteId, add_cloze_note, update_cloze_note};
+use log::{debug, trace};
 
 mod anki;
 
@@ -19,11 +20,13 @@ const IGNORE_PATHS: [&str; 1] = ["./Excalidraw"];
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
+    env_logger::init();
     let client = reqwest::Client::new();
     traverse(PathBuf::from("."), &client).await.unwrap();
 }
 
 async fn traverse(dir: PathBuf, client: &reqwest::Client) -> io::Result<()> {
+    trace!("Recursing into dir {}", dir.display());
     for entry in dir.read_dir()?.flatten() {
         let path = entry.path();
         // recurse
@@ -52,6 +55,7 @@ enum Math {
 }
 
 async fn handle_md(path: &Path, client: &reqwest::Client) -> io::Result<()> {
+    debug!("Handling Markdown file {}", path.display());
     let mut file_contents = fs::read_to_string(path)?
         .into_chars()
         .collect::<Vec<char>>();
