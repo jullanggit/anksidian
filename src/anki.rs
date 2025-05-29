@@ -74,20 +74,25 @@ struct AddNote {
     options: Options,
     tags: Vec<String>,
 }
+impl AddNote {
+    fn to_query(&self) -> String {
+        let mut out = format!("deck:\"{}\" note:\"{}\"", self.deck_name, self.model_name);
+        for (field, value) in &self.fields {
+            out.push_str(&format!(" \"{field}\":\"{value}\""));
+        }
+        for tag in &self.tags {
+            out.push_str(" tag:\"");
+            out.push_str(tag);
+            out.push('"');
+        }
+        out
+    }
+}
 
 #[derive(Serialize, Debug)]
 #[serde(rename_all = "camelCase")]
 struct UpdateNote {
     id: NoteId,
-    fields: HashMap<String, String>,
-    tags: Vec<String>,
-}
-
-#[derive(Serialize, Debug)]
-#[serde(rename_all = "camelCase")]
-struct FindNotes {
-    deck_name: String,
-    model_name: String,
     fields: HashMap<String, String>,
     tags: Vec<String>,
 }
@@ -103,6 +108,11 @@ struct Options {
 #[serde(rename_all = "camelCase")]
 enum DuplicateScope {
     Deck,
+}
+
+#[derive(Serialize, Debug)]
+struct Query<Q: Serialize + Debug> {
+    query: Q,
 }
 
 #[derive(Deserialize, Debug)]
@@ -139,7 +149,7 @@ pub async fn add_cloze_note(
     let request = Request {
         action: Action::AddNote,
         version: 6,
-        params: Note { note },
+        params: Note { note: &note },
     };
 
     let result = request.request(client).await;
@@ -147,19 +157,11 @@ pub async fn add_cloze_note(
     // handle duplicate note
     match result {
         Err(e) if &e == "cannot create note because it is a duplicate" => {
-            let note = FindNotes {
-                deck_name: DECK.to_string(),
-                model_name: "Cloze".to_string(),
-                fields: HashMap::from([
-                    ("Text".to_string(), text),
-                    ("Back Extra".to_string(), String::new()),
-                ]),
-                tags,
-            };
+            let query = note.to_query();
             let request = Request {
                 action: Action::FindNotes,
                 version: 6,
-                params: Note { note },
+                params: Query { query },
             };
 
             return Ok(request.request::<Vec<_>>(client).await?[0]);

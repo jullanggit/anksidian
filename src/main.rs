@@ -1,6 +1,5 @@
 #![feature(exit_status_error)]
 #![feature(array_windows)]
-#![feature(default_field_values)]
 #![feature(string_into_chars)]
 
 use std::{
