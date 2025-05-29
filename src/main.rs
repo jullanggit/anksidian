@@ -12,7 +12,7 @@ use std::{
 };
 
 use anki::{NoteId, add_cloze_note, update_cloze_note};
-use log::{debug, trace};
+use log::{debug, error, trace};
 use tokio::{io::AsyncWriteExt, process::Command};
 
 mod anki;
@@ -139,28 +139,34 @@ async fn handle_md(path: &Path, client: &reqwest::Client) -> io::Result<()> {
                                 .collect::<String>()
                                 .parse()
                                 .unwrap();
-                            update_cloze_note(
+
+                            let result = update_cloze_note(
                                 mem::take(&mut current_text),
                                 NoteId(note_id),
                                 Vec::new(),
                                 client,
                             )
-                            .await
-                            .unwrap();
+                            .await;
+                            if let Err(e) = result {
+                                error!("{e}");
+                            }
+
+                            i += mock_note_id.len();
                         // add new note
                         } else {
-                            let note_id =
-                                add_cloze_note(mem::take(&mut current_text), Vec::new(), client)
-                                    .await
-                                    .unwrap();
+                            match add_cloze_note(mem::take(&mut current_text), Vec::new(), client)
+                                .await
+                            {
+                                Ok(note_id) => {
+                                    let index = i.min(file_contents.len());
+                                    file_contents.splice(index..index, format_note_id(note_id.0));
 
-                            let index = i.min(file_contents.len());
-                            file_contents.splice(index..index, format_note_id(note_id.0));
-
-                            changed = true;
+                                    changed = true;
+                                    i += mock_note_id.len();
+                                }
+                                Err(e) => error!("{e}"),
+                            }
                         }
-
-                        i += mock_note_id.len();
                     }
 
                     if !skip_before_next_cloze(&file_contents, &mut i, &mut line) {
