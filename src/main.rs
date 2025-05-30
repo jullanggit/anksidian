@@ -75,10 +75,11 @@ async fn handle_md(path: &Path, client: &reqwest::Client) -> io::Result<()> {
     // code
     let mut in_code = false;
     // headings
-    let mut possible_heading = true;
+    let mut possible_heading: u8 = 1;
     let mut capturing_heading = false;
     let mut heading_level = 0;
     let mut headings: Vec<String> = Vec::new();
+    let mut new_heading = false;
 
     // push the character to current/math text, based on math
     let mut i = 0;
@@ -102,7 +103,8 @@ async fn handle_md(path: &Path, client: &reqwest::Client) -> io::Result<()> {
                     if contains_cloze && !current_text.is_empty() {
                         // append path & headings
                         current_text.push('\n');
-                        current_text.push_str(&path.to_string_lossy());
+                        let path_str = path.to_string_lossy();
+                        current_text.push_str(&path_str[2..path_str.len() - 3]); // remove ./ and .md
                         for heading in &headings {
                             if !heading.is_empty() {
                                 write!(current_text, " > {heading}").unwrap();
@@ -155,8 +157,9 @@ async fn handle_md(path: &Path, client: &reqwest::Client) -> io::Result<()> {
 
                     contains_cloze = false;
                     // headings
-                    possible_heading = true;
+                    possible_heading = 1;
                     capturing_heading = false;
+                    heading_level = 0;
 
                     if chars[0].is_none() {
                         break;
@@ -210,10 +213,12 @@ async fn handle_md(path: &Path, client: &reqwest::Client) -> io::Result<()> {
                 i += 1
             }
             // headings
-            [Some('#'), _, _] if possible_heading => {
+            [Some('#'), _, _] if possible_heading > 0 => {
                 heading_level += 1;
+                possible_heading = 2;
+                new_heading = true;
             }
-            [Some(' '), _, _] if heading_level > 0 => {
+            [Some(' '), _, _] if heading_level > 0 && !capturing_heading => {
                 capturing_heading = true;
             }
             [Some(other), _, _] => {
@@ -226,6 +231,10 @@ async fn handle_md(path: &Path, client: &reqwest::Client) -> io::Result<()> {
                     } else {
                         headings.truncate(heading_level);
                     }
+                    if new_heading {
+                        headings[heading_level - 1].clear();
+                        new_heading = false;
+                    }
                     headings[heading_level - 1].push(other);
                 }
                 if math.is_some() {
@@ -237,6 +246,7 @@ async fn handle_md(path: &Path, client: &reqwest::Client) -> io::Result<()> {
             }
         }
         i += 1;
+        possible_heading.saturating_sub(1);
     }
     if changed {
         fs::write(path, file_contents.into_iter().collect::<String>())
