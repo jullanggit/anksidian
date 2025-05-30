@@ -8,6 +8,7 @@ That being said, here's an outline of the mentioned use-case:
 - Have Anki open
 - Run the cli in a directory with Markdown files
 - Anksidian will add the clozes to anki and insert html-comments with their note ids below
+- Any files/directories mentioned in a .gitignore will be ignored
 Supported are:
 - Multi-line flashcards
 - Math blocks
