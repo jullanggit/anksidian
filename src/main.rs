@@ -252,7 +252,7 @@ async fn handle_md(path: &Path, client: &reqwest::Client) -> io::Result<()> {
             }
         }
         i += 1;
-        possible_heading.saturating_sub(1);
+        possible_heading = possible_heading.saturating_sub(1);
     }
     if changed {
         fs::write(path, file_contents.into_iter().collect::<String>())
