@@ -23,7 +23,6 @@ Supported are:
 - can be found in `test.md`
 
 ## TODO
-- add file/header path
 - hash files
 
 ![](https://brainmade.org/black-logo.svg)

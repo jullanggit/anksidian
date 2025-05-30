@@ -63,24 +63,24 @@ async fn handle_md(path: &Path, client: &reqwest::Client) -> io::Result<()> {
         .collect::<Vec<char>>();
     let mut changed = false;
 
+    // clozes
     let mut contains_cloze = false;
-    let mut current_text = String::new();
-    let mut math_text = String::new();
     let mut in_cloze = false;
     let mut num_cloze = 1;
+    // text
+    let mut current_text = String::new();
+    // math
+    let mut math_text = String::new();
     let mut math = None;
+    // code
     let mut in_code = false;
+    // headings
+    let mut possible_heading = true;
+    let mut capturing_heading = false;
+    let mut heading_level = 0;
+    let mut headings: Vec<String> = Vec::new();
 
     // push the character to current/math text, based on math
-    let push_char =
-        |other: char, math: Option<Math>, math_text: &mut String, current_text: &mut String| {
-            if math.is_some() {
-                math_text
-            } else {
-                current_text
-            }
-            .push(other)
-        };
     let mut i = 0;
     loop {
         let chars = array::from_fn(|offset| file_contents.get(i + offset).cloned());
@@ -98,8 +98,17 @@ async fn handle_md(path: &Path, client: &reqwest::Client) -> io::Result<()> {
                 } else {
                     num_cloze = 1;
 
-                    let current_text = mem::take(&mut current_text);
+                    let mut current_text = mem::take(&mut current_text);
                     if contains_cloze && !current_text.is_empty() {
+                        // append path & headings
+                        current_text.push('\n');
+                        current_text.push_str(&path.to_string_lossy());
+                        for heading in &headings {
+                            if !heading.is_empty() {
+                                write!(current_text, " > {heading}").unwrap();
+                            }
+                        }
+
                         // handle note id
                         let format_note_id =
                             |id: u64| format!("\n<!--NoteID:{id}-->").into_chars().collect();
@@ -145,6 +154,10 @@ async fn handle_md(path: &Path, client: &reqwest::Client) -> io::Result<()> {
                     }
 
                     contains_cloze = false;
+                    // headings
+                    possible_heading = true;
+                    capturing_heading = false;
+
                     if chars[0].is_none() {
                         break;
                     }
@@ -191,12 +204,37 @@ async fn handle_md(path: &Path, client: &reqwest::Client) -> io::Result<()> {
                     let converted = convert_math(&mem::take(&mut math_text), Math::Inline).await?;
                     current_text.push_str(&converted);
                 }
-                Some(Math::Display) => push_char('$', math, &mut math_text, &mut current_text),
+                Some(Math::Display) => math_text.push('$'),
             },
             [Some('['), Some('['), _] | [Some(']'), Some(']'), _] if math.is_none() && !in_code => {
                 i += 1
             }
-            [Some(other), _, _] => push_char(other, math, &mut math_text, &mut current_text),
+            // headings
+            [Some('#'), _, _] if possible_heading => {
+                heading_level += 1;
+            }
+            [Some(' '), _, _] if heading_level > 0 => {
+                capturing_heading = true;
+            }
+            [Some(other), _, _] => {
+                if capturing_heading {
+                    // adjust length
+                    if heading_level > headings.len() {
+                        for _ in 0..heading_level - headings.len() {
+                            headings.push(Default::default());
+                        }
+                    } else {
+                        headings.truncate(heading_level);
+                    }
+                    headings[heading_level - 1].push(other);
+                }
+                if math.is_some() {
+                    &mut math_text
+                } else {
+                    &mut current_text
+                }
+                .push(other)
+            }
         }
         i += 1;
     }
