@@ -1,6 +1,7 @@
 #![feature(exit_status_error)]
 #![feature(array_windows)]
 #![feature(string_into_chars)]
+#![feature(iter_intersperse)]
 
 use std::{
     array,
@@ -103,8 +104,13 @@ async fn handle_md(path: &Path, client: &reqwest::Client) -> io::Result<()> {
                     if contains_cloze && !current_text.is_empty() {
                         // append path & headings
                         current_text.push_str("<br>");
-                        let path_str = path.to_string_lossy();
-                        current_text.push_str(&path_str[2..path_str.len() - 3]); // remove ./ and .md
+                        let path_str = path
+                            .iter()
+                            .skip(1)
+                            .map(|part| part.to_string_lossy().to_string())
+                            .intersperse(" > ".to_owned())
+                            .collect::<String>();
+                        current_text.push_str(&path_str[..path_str.len() - 3]); // remove .md
                         for heading in &headings {
                             if !heading.is_empty() {
                                 write!(current_text, " > {heading}").unwrap();
