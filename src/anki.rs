@@ -1,6 +1,9 @@
 use log::debug;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
-use std::{collections::HashMap, fmt::Debug};
+use std::{
+    collections::HashMap,
+    fmt::{Debug, Write},
+};
 
 // Handles interaction with AnkiConnect.
 // Could maybe use a bit more type-safety, stuff like action <-> params,
@@ -78,12 +81,10 @@ impl AddNote {
     fn to_query(&self) -> String {
         let mut out = format!("deck:\"{}\" note:\"{}\"", self.deck_name, self.model_name);
         for (field, value) in &self.fields {
-            out.push_str(&format!(" \"{field}\":\"{value}\""));
+            write!(out, " \"{field}\":\"{value}\"").unwrap();
         }
         for tag in &self.tags {
-            out.push_str(" tag:\"");
-            out.push_str(tag);
-            out.push('"');
+            write!(out, " tag:\"{tag}\"").unwrap();
         }
         out
     }

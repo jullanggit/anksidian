@@ -3,6 +3,7 @@
 #![feature(string_into_chars)]
 
 use std::{
+    fmt::Write,
     fs,
     io::{self},
     mem,
@@ -170,7 +171,7 @@ async fn handle_md(path: &Path, client: &reqwest::Client) -> io::Result<()> {
                 if in_cloze {
                     current_text.push_str("}}");
                 } else {
-                    current_text.push_str(&format!("{{{{c{num_cloze}::")); // could be done without an allocation
+                    write!(current_text, "{{{{c{num_cloze}::").unwrap();
                     num_cloze += 1;
                 }
 
