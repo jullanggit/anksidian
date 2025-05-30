@@ -62,34 +62,13 @@ async fn handle_md(path: &Path, client: &reqwest::Client) -> io::Result<()> {
         .collect::<Vec<char>>();
     let mut changed = false;
 
+    let mut contains_cloze = false;
     let mut current_text = String::new();
     let mut math_text = String::new();
     let mut in_cloze = false;
     let mut num_cloze = 1;
     let mut math = None;
 
-    let mut i = 0;
-    // skip to the newline before the next cloze
-    let skip_before_next_cloze = |file_contents: &[char], i: &mut usize| {
-        if let Some(next_cloze_offset) = file_contents[*i..]
-            .array_windows()
-            .position(|chars| chars == &['='; 2])
-        {
-            let newline_before_offset = file_contents[*i..*i + next_cloze_offset]
-                .iter()
-                .rposition(|char| *char == '\n')
-                .unwrap_or(0);
-            *i += newline_before_offset;
-
-            true
-        // No more clozes in the file
-        } else {
-            false
-        }
-    };
-    if !skip_before_next_cloze(&file_contents, &mut i) {
-        return Ok(());
-    };
     // push the character to current/math text, based on math
     let push_char =
         |other: char, math: Option<Math>, math_text: &mut String, current_text: &mut String| {
@@ -100,6 +79,7 @@ async fn handle_md(path: &Path, client: &reqwest::Client) -> io::Result<()> {
             }
             .push(other)
         };
+    let mut i = 0;
     loop {
         let char_a = file_contents.get(i).cloned();
         let char_b = file_contents.get(i + 1).cloned();
@@ -108,21 +88,24 @@ async fn handle_md(path: &Path, client: &reqwest::Client) -> io::Result<()> {
                 if in_cloze || math.is_some() {
                     current_text.push('\n');
 
-                    // prevent infinite loop
+                    // prevent infinite loop. Should enter the below path on the next loop
                     if char_a.is_none() {
                         in_cloze = false;
                         math = None;
                     }
+                // outside of any special blocks
                 } else {
                     num_cloze = 1;
 
-                    if !current_text.is_empty() {
+                    let current_text = mem::take(&mut current_text);
+                    if contains_cloze && !current_text.is_empty() {
                         // handle note id
                         let format_note_id =
                             |id: u64| format!("\n<!--NoteID:{id}-->").into_chars().collect();
-                        let mock_note_id: Vec<char> = format_note_id(1000000000000);
+                        let mock_note_id: Vec<char> = format_note_id(1000000000000); // should have the same length as normal ones
 
-                        if let Some(potential_id) = file_contents.get(i..i + mock_note_id.len()) // index + 1 to skip newline
+                        // if the potential id has the correct format
+                        if let Some(potential_id) = file_contents.get(i..i + mock_note_id.len())
                             && potential_id[0..12] == mock_note_id[0..12]
                             && potential_id[25..] == mock_note_id[25..]
                         // update existing note
@@ -134,7 +117,7 @@ async fn handle_md(path: &Path, client: &reqwest::Client) -> io::Result<()> {
                                 .unwrap();
 
                             let result = update_cloze_note(
-                                mem::take(&mut current_text),
+                                current_text,
                                 NoteId(note_id),
                                 Vec::new(),
                                 client,
@@ -147,9 +130,7 @@ async fn handle_md(path: &Path, client: &reqwest::Client) -> io::Result<()> {
                             i += mock_note_id.len();
                         // add new note
                         } else {
-                            match add_cloze_note(mem::take(&mut current_text), Vec::new(), client)
-                                .await
-                            {
+                            match add_cloze_note(current_text, Vec::new(), client).await {
                                 Ok(note_id) => {
                                     let index = i.min(file_contents.len());
                                     file_contents.splice(index..index, format_note_id(note_id.0));
@@ -162,7 +143,8 @@ async fn handle_md(path: &Path, client: &reqwest::Client) -> io::Result<()> {
                         }
                     }
 
-                    if char_a.is_none() || !skip_before_next_cloze(&file_contents, &mut i) {
+                    contains_cloze = false;
+                    if char_a.is_none() {
                         break;
                     }
                 }
@@ -175,11 +157,10 @@ async fn handle_md(path: &Path, client: &reqwest::Client) -> io::Result<()> {
                     num_cloze += 1;
                 }
 
-                // toggle in_cloze
-                in_cloze = !in_cloze;
-
                 // skip second '='
                 i += 1;
+                in_cloze = !in_cloze;
+                contains_cloze = true;
             }
             [Some('$'), Some('$')] => match math {
                 None => {
