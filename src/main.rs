@@ -3,6 +3,7 @@
 #![feature(string_into_chars)]
 
 use std::{
+    array,
     fmt::Write,
     fs,
     io::{self},
@@ -68,6 +69,7 @@ async fn handle_md(path: &Path, client: &reqwest::Client) -> io::Result<()> {
     let mut in_cloze = false;
     let mut num_cloze = 1;
     let mut math = None;
+    let mut in_code = false;
 
     // push the character to current/math text, based on math
     let push_char =
@@ -81,15 +83,14 @@ async fn handle_md(path: &Path, client: &reqwest::Client) -> io::Result<()> {
         };
     let mut i = 0;
     loop {
-        let char_a = file_contents.get(i).cloned();
-        let char_b = file_contents.get(i + 1).cloned();
-        match [char_a, char_b] {
-            [Some('\n'), _] | [None, _] => {
-                if in_cloze || math.is_some() {
+        let chars = array::from_fn(|offset| file_contents.get(i + offset).cloned());
+        match chars {
+            [Some('\n'), _, _] | [None, _, _] => {
+                if in_cloze || math.is_some() || in_code {
                     current_text.push('\n');
 
                     // prevent infinite loop. Should enter the below path on the next loop
-                    if char_a.is_none() {
+                    if chars[0].is_none() {
                         in_cloze = false;
                         math = None;
                     }
@@ -144,12 +145,18 @@ async fn handle_md(path: &Path, client: &reqwest::Client) -> io::Result<()> {
                     }
 
                     contains_cloze = false;
-                    if char_a.is_none() {
+                    if chars[0].is_none() {
                         break;
                     }
                 }
             }
-            [Some('='), Some('=')] if math.is_none() => {
+            // code
+            [Some('`'), Some('`'), Some('`')] if math.is_none() => {
+                in_code = !in_code;
+                current_text.push('`'); // still push entire "```"
+            }
+            // cloze
+            [Some('='), Some('='), _] if math.is_none() && !in_code => {
                 if in_cloze {
                     current_text.push_str("}}");
                 } else {
@@ -162,7 +169,8 @@ async fn handle_md(path: &Path, client: &reqwest::Client) -> io::Result<()> {
                 in_cloze = !in_cloze;
                 contains_cloze = true;
             }
-            [Some('$'), Some('$')] => match math {
+            // math
+            [Some('$'), Some('$'), _] if !in_code => match math {
                 None => {
                     math = Some(Math::Display);
                     i += 1
@@ -176,7 +184,7 @@ async fn handle_md(path: &Path, client: &reqwest::Client) -> io::Result<()> {
                     }
                 }
             },
-            [Some('$'), _] => match math {
+            [Some('$'), _, _] if !in_code => match math {
                 None => math = Some(Math::Inline),
                 Some(Math::Inline) => {
                     math = None;
@@ -185,8 +193,10 @@ async fn handle_md(path: &Path, client: &reqwest::Client) -> io::Result<()> {
                 }
                 Some(Math::Display) => push_char('$', math, &mut math_text, &mut current_text),
             },
-            [Some('['), Some('[')] | [Some(']'), Some(']')] if math.is_none() => i += 1,
-            [Some(other), _] => push_char(other, math, &mut math_text, &mut current_text),
+            [Some('['), Some('['), _] | [Some(']'), Some(']'), _] if math.is_none() && !in_code => {
+                i += 1
+            }
+            [Some(other), _, _] => push_char(other, math, &mut math_text, &mut current_text),
         }
         i += 1;
     }
