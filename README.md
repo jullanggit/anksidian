@@ -20,18 +20,7 @@ Supported are:
 - Obsidian-style hyperlinks (just get removed)
 
 ## Example
-```file.md
-# Thermal expansion
-## Definition
-- Change of ==[[volume]]/length== in response to ==change of
-[[temperature]]==
-## Formula
-==$$Delta V/L = V/L dot gamma/alpha dot Delta T$$==
-## Coefficients
-==$gamma$== = ==linear==, ==$alpha$== = ==volumetric coefficient==
-### Unit
-==$\left\lbrack \frac \gamma \alpha \right\rbrack = 1K^{-1}\$==
-```
+- can be found in `test.md`
 
 ## TODO
 - add file/header path
