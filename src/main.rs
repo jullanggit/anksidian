@@ -20,7 +20,7 @@ mod anki;
 
 const IGNORE_PATHS: [&str; 1] = ["./Excalidraw"];
 
-#[tokio::main(flavor = "current_thread")]
+#[tokio::main]
 async fn main() {
     env_logger::init();
     let client = reqwest::Client::new();
