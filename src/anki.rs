@@ -81,7 +81,7 @@ impl AddNote {
     fn to_query(&self) -> String {
         let mut out = format!("deck:\"{}\" note:\"{}\"", self.deck_name, self.model_name);
         for (field, value) in &self.fields {
-            write!(out, " \"{field}\":\"{value}\"").unwrap();
+            write!(out, " \"{field}\":\"{}\"", value.replace(':', "\\:")).unwrap();
         }
         for tag in &self.tags {
             write!(out, " tag:\"{tag}\"").unwrap();
