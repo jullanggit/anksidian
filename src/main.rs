@@ -275,6 +275,7 @@ async fn convert_math(str: &str, math_type: Math) -> io::Result<String> {
             Math::Display => format!("\\[{str}\\]"),
         })
     }
+    .map(|string| string.replace("}}", "} }")) // avoid confusing anki
 }
 
 async fn is_typst(math: &str) -> io::Result<bool> {
