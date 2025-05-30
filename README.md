@@ -3,7 +3,7 @@ My cli for converting Obsidian Markdown files to anki clozure flashcards
 ## Usage
 This is currently heavily hard-coded for my exact use-case, feel free to open an issue / PR for anything you want to be configurable.
 That being said, here's an outline of the mentioned use-case:
-- Highlight (surround with "==") anything you want to make a cloze-style flashcard
+- Highlight (==text==) anything you want to make a cloze-style flashcard
 - Setup AnkiConnect
 - Have Anki open
 - Run the cli in a directory with Markdown files
