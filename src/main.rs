@@ -88,7 +88,7 @@ async fn handle_md(path: &Path, client: &reqwest::Client) -> io::Result<()> {
         match chars {
             [Some('\n'), _, _] | [None, _, _] => {
                 if in_cloze || math.is_some() || in_code {
-                    current_text.push('\n');
+                    current_text.push_str("<br>"); // anki linebreak
 
                     // prevent infinite loop. Should enter the below path on the next loop
                     if chars[0].is_none() {
@@ -102,7 +102,7 @@ async fn handle_md(path: &Path, client: &reqwest::Client) -> io::Result<()> {
                     let mut current_text = mem::take(&mut current_text);
                     if contains_cloze && !current_text.is_empty() {
                         // append path & headings
-                        current_text.push('\n');
+                        current_text.push_str("<br>");
                         let path_str = path.to_string_lossy();
                         current_text.push_str(&path_str[2..path_str.len() - 3]); // remove ./ and .md
                         for heading in &headings {
