@@ -25,5 +25,6 @@ Supported are:
 
 ## TODO
 - hash files
+- handle renamed hyperlinks
 
 ![](https://brainmade.org/black-logo.svg)
