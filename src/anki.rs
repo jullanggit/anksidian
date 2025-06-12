@@ -186,7 +186,11 @@ pub async fn add_cloze_note(
                 params: Query { query },
             };
 
-            return Ok(request.request::<Vec<_>>(client).await?[0]);
+            return Ok(*request
+                .request::<Vec<_>>(client)
+                .await?
+                .first()
+                .expect("Note should exist, if it is a duplicate"));
         }
         other => other,
     }
