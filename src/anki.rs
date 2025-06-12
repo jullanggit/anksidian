@@ -1,9 +1,11 @@
-use log::debug;
+use log::{debug, warn};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{
     collections::HashMap,
     fmt::{Debug, Write},
+    time::Duration,
 };
+use tokio::time::sleep;
 
 // Handles interaction with AnkiConnect.
 // Could maybe use a bit more type-safety, stuff like action <-> params,
@@ -11,6 +13,7 @@ use std::{
 // it would complicate the serialization
 
 const DECK: &str = "Obsidian";
+const MAX_BACKOFF: u8 = 5;
 
 #[derive(Serialize, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -24,12 +27,25 @@ impl<P: Serialize + Debug> Request<P> {
         &self,
         client: &reqwest::Client,
     ) -> Result<R, String> {
-        let response = client
-            .post("http://localhost:8765")
-            .json(&self)
-            .send()
-            .await
-            .expect("AnkiConnect should be reachable");
+        let request = client.post("http://localhost:8765").json(&self);
+        let mut i = 0;
+        let response = loop {
+            let timeout = Duration::from_millis(100 * 2_u64.pow(i.into()));
+            match request
+                .try_clone()
+                .expect("request should be cloneable")
+                .send()
+                .await
+            {
+                Ok(response) => break response,
+                Err(e) if i < MAX_BACKOFF => {
+                    warn!("AnkiConnect request failed (attempt {i}): {e}. Retrying in {timeout:?}");
+                    sleep(timeout).await;
+                }
+                Err(e) => panic!("AnkiConnect request failed: {e}"),
+            }
+            i += 1;
+        };
 
         let response = if response.status().is_success() {
             let response: Response<R> = response.json().await.unwrap();
