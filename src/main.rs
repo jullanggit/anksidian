@@ -2,6 +2,7 @@
 #![feature(array_windows)]
 #![feature(string_into_chars)]
 #![feature(iter_intersperse)]
+#![feature(iter_map_windows)]
 
 use std::{
     array,
@@ -62,7 +63,9 @@ async fn handle_md(path: &Path, client: &reqwest::Client) -> io::Result<()> {
     let mut file_contents = fs::read_to_string(path)?
         .into_chars()
         .collect::<Vec<char>>();
-    let mut changed = false;
+    let mut file_changed = false;
+
+    let tags = collect_tags(&file_contents);
 
     // clozes
     let mut contains_cloze = false;
@@ -91,7 +94,7 @@ async fn handle_md(path: &Path, client: &reqwest::Client) -> io::Result<()> {
                 if in_cloze || math.is_some() || in_code {
                     current_text.push_str("<br>"); // anki linebreak
 
-                    // prevent infinite loop. Should enter the below path on the next loop
+                    // prevent infinite loop. Should enter the path below on the next loop
                     if chars[0].is_none() {
                         in_cloze = false;
                         math = None;
@@ -115,6 +118,14 @@ async fn handle_md(path: &Path, client: &reqwest::Client) -> io::Result<()> {
                             if !heading.is_empty() {
                                 write!(current_text, " > {heading}").unwrap();
                             }
+                        }
+                        // if there are any tags (>1 because)
+                        if tags.len() > 1 {
+                            current_text.push('\n');
+                        }
+                        for tag in &tags {
+                            current_text.push_str(tag);
+                            current_text.push_str(", ");
                         }
 
                         // handle note id
@@ -153,7 +164,7 @@ async fn handle_md(path: &Path, client: &reqwest::Client) -> io::Result<()> {
                                     let index = i.min(file_contents.len());
                                     file_contents.splice(index..index, format_note_id(note_id.0));
 
-                                    changed = true;
+                                    file_changed = true;
                                     i += mock_note_id.len();
                                 }
                                 Err(e) => error!("{e}"),
@@ -254,11 +265,106 @@ async fn handle_md(path: &Path, client: &reqwest::Client) -> io::Result<()> {
         i += 1;
         possible_heading.saturating_sub(1);
     }
-    if changed {
+    if file_changed {
         fs::write(path, file_contents.into_iter().collect::<String>())
     } else {
         Ok(())
     }
+}
+
+// A tag is a # followed directly by a non-whitespace character.
+// Tags can be hierarchival with / as the delimiter, but we dont need to handle that specially
+fn collect_tags(contents: &[char]) -> Vec<String> {
+    let mut out = vec![String::new()];
+    let mut position = 0;
+    let mut collecting_tag = false;
+
+    while position < contents.len() {
+        if collecting_tag {
+            let char = contents[position];
+            // end of tag
+            if char.is_whitespace() {
+                // end current tag by pushing a new empty one
+                out.push(String::new());
+                collecting_tag = false;
+            } else {
+                out.last_mut()
+                    .expect(
+                        "There is always a last element because \
+                        out is initialised with one element and we never pop",
+                    )
+                    .push(char);
+            }
+            position += 1;
+        } else {
+            let find_inline_math =
+                |position| contents[position..].iter().position(|char| char == &'$');
+            let find_display_math = |position| {
+                contents[position..]
+                    .iter()
+                    .map_windows(|chars| *chars)
+                    .position(|chars| chars == [&'$'; 2])
+            };
+            let find_code = |position| {
+                contents[position..]
+                    .iter()
+                    .map_windows(|chars| *chars)
+                    .position(|chars| chars == [&'`'; 3])
+            };
+            let closest_inline_math = find_inline_math(position);
+            let closest_display_math = find_display_math(position);
+            let closest_code = find_code(position);
+            let closest_tag = contents[position..]
+                .iter()
+                .map_windows(|chars: &[&char; 2]| *chars)
+                .position(|chars| chars[0] == &'#' && !chars[1].is_whitespace());
+
+            // if the closest thing of interest is a...
+            // ...tag
+            if let Some(tag_position) = closest_tag
+                && closest_tag
+                    < closest_inline_math
+                        .min(closest_display_math)
+                        .min(closest_code)
+            {
+                // go to it and start collecting it
+                position = tag_position; // dont skip #
+                collecting_tag = true;
+
+            // ...inline math block
+            } else if let Some(math_position) = closest_inline_math
+                && closest_inline_math < closest_display_math.min(closest_code)
+                // ...find its end
+                && let Some(next_inline_math) = find_inline_math(math_position + 1)
+            {
+                // ...and skip to after it
+                position = next_inline_math + 1;
+
+            // ...display math block
+            } else if let Some(math_position) = closest_display_math
+                && closest_display_math < closest_code
+                // ...find its end
+                && let Some(next_display_math) = find_display_math(math_position + 2)
+            {
+                // ...and skip to after it
+                position = next_display_math + 2;
+
+            // ...code block
+            } else if let Some(code_position) = closest_code
+                // ...find its end
+                && let Some(next_code) = find_code(code_position + 3)
+            {
+                // ...and skip to after it
+                position = next_code + 3;
+
+            // ... nothing
+            } else {
+                break;
+            }
+        }
+    }
+
+    out
 }
 
 /// Convert from Obsidian latex/typst to anki latex
