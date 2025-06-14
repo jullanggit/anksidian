@@ -153,10 +153,10 @@ pub async fn add_cloze_note(
     deck: String,
     client: &reqwest::Client,
 ) -> Result<NoteId, String> {
-    ensure_deck_exists(client, deck).await?;
+    ensure_deck_exists(client, deck.clone()).await?;
 
     let note = AddNote {
-        deck_name: deck,
+        deck_name: deck.clone(),
         model_name: "Cloze".to_string(),
         fields: HashMap::from([
             ("Text".to_string(), text.clone()),

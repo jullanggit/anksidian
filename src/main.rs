@@ -27,8 +27,7 @@ async fn main() {
     env_logger::init();
     let client = reqwest::Client::new();
     let deck = env::args()
-        .skip(1)
-        .next()
+        .nth(1)
         .expect("The deck name should be passed as the first argument");
     traverse(PathBuf::from("."), &client, deck).await.unwrap();
 }
@@ -43,13 +42,13 @@ async fn traverse(dir: PathBuf, client: &reqwest::Client, deck: String) -> io::R
                 .map(AsRef::<Path>::as_ref)
                 .contains(&path.as_path())
         {
-            Box::pin(traverse(path, client, deck)).await?;
+            Box::pin(traverse(path, client, deck.clone())).await?;
         // markdown file
         } else if path.is_file()
             && let Some(extension) = path.extension()
             && extension == "md"
         {
-            handle_md(&path, client, deck).await?;
+            handle_md(&path, client, deck.clone()).await?;
         }
     }
 
@@ -162,7 +161,9 @@ async fn handle_md(path: &Path, client: &reqwest::Client, deck: String) -> io::R
                             i += mock_note_id.len();
                         // add new note
                         } else {
-                            match add_cloze_note(current_text, Vec::new(), deck, client).await {
+                            match add_cloze_note(current_text, Vec::new(), deck.clone(), client)
+                                .await
+                            {
                                 Ok(note_id) => {
                                     let index = i.min(file_contents.len());
                                     file_contents.splice(index..index, format_note_id(note_id.0));
@@ -331,7 +332,7 @@ fn collect_tags(contents: &[char]) -> Vec<String> {
                         .min(closest_code)
             {
                 // go to it and start collecting it
-                position = tag_position; // dont skip #
+                position += tag_position; // dont skip #
                 collecting_tag = true;
 
             // ...inline math block
@@ -341,7 +342,7 @@ fn collect_tags(contents: &[char]) -> Vec<String> {
                 && let Some(next_inline_math) = find_inline_math(math_position + 1)
             {
                 // ...and skip to after it
-                position = next_inline_math + 1;
+                position += next_inline_math + 1;
 
             // ...display math block
             } else if let Some(math_position) = closest_display_math
@@ -350,7 +351,7 @@ fn collect_tags(contents: &[char]) -> Vec<String> {
                 && let Some(next_display_math) = find_display_math(math_position + 2)
             {
                 // ...and skip to after it
-                position = next_display_math + 2;
+                position += next_display_math + 2;
 
             // ...code block
             } else if let Some(code_position) = closest_code
@@ -358,7 +359,7 @@ fn collect_tags(contents: &[char]) -> Vec<String> {
                 && let Some(next_code) = find_code(code_position + 3)
             {
                 // ...and skip to after it
-                position = next_code + 3;
+                position += next_code + 3;
 
             // ... nothing
             } else {
