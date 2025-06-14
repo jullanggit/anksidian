@@ -314,7 +314,9 @@ fn collect_tags(contents: &[char]) -> Vec<String> {
             let closest_tag = contents[position..]
                 .iter()
                 .map_windows(|chars: &[&char; 2]| *chars)
-                .position(|chars| chars[0] == &'#' && !chars[1].is_whitespace());
+                .position(|chars| {
+                    chars[0] == &'#' && !chars[1].is_whitespace() && chars[1] != &'#'
+                });
 
             // if the closest thing of interest is a...
             // ...tag
