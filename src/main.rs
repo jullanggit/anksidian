@@ -122,13 +122,6 @@ async fn handle_md(path: &Path, client: &reqwest::Client, deck: String) -> io::R
                                 write!(current_text, " > {heading}").unwrap();
                             }
                         }
-                        if !tags.is_empty() {
-                            current_text.push('\n');
-                        }
-                        for tag in &tags {
-                            current_text.push_str(tag);
-                            current_text.push_str(", ");
-                        }
 
                         // handle note id
                         let format_note_id =
@@ -150,7 +143,7 @@ async fn handle_md(path: &Path, client: &reqwest::Client, deck: String) -> io::R
                             let result = update_cloze_note(
                                 current_text,
                                 NoteId(note_id),
-                                Vec::new(),
+                                tags.clone(),
                                 client,
                             )
                             .await;
@@ -161,7 +154,7 @@ async fn handle_md(path: &Path, client: &reqwest::Client, deck: String) -> io::R
                             i += mock_note_id.len();
                         // add new note
                         } else {
-                            match add_cloze_note(current_text, Vec::new(), deck.clone(), client)
+                            match add_cloze_note(current_text, tags.clone(), deck.clone(), client)
                                 .await
                             {
                                 Ok(note_id) => {
