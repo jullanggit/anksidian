@@ -27,4 +27,4 @@ def thermal_expansion(V, gamma, delta_T):
 
 ==$\left\lbrack \frac \gamma \alpha \right\rbrack = 1K^{-1}\$==
 
-#test, #testing
+#test #testing

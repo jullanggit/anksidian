@@ -294,71 +294,72 @@ fn collect_tags(contents: &[char]) -> Vec<String> {
             }
             position += 1;
         } else {
-            let find_inline_math =
-                |position| contents[position..].iter().position(|char| char == &'$');
+            let find_inline_math = |position| {
+                contents[position..]
+                    .iter()
+                    .position(|char| char == &'$')
+                    .unwrap_or(contents.len())
+            };
             let find_display_math = |position| {
                 contents[position..]
                     .iter()
                     .map_windows(|chars| *chars)
                     .position(|chars| chars == [&'$'; 2])
+                    .unwrap_or(contents.len())
             };
             let find_code = |position| {
                 contents[position..]
                     .iter()
                     .map_windows(|chars| *chars)
                     .position(|chars| chars == [&'`'; 3])
+                    .unwrap_or(contents.len())
             };
             let closest_inline_math = find_inline_math(position);
             let closest_display_math = find_display_math(position);
             let closest_code = find_code(position);
-            let closest_tag = contents[position..]
+            let Some(closest_tag) = contents[position..]
                 .iter()
                 .map_windows(|chars: &[&char; 2]| *chars)
                 .position(|chars| {
                     chars[0] == &'#' && !chars[1].is_whitespace() && chars[1] != &'#'
-                });
-
-            // if the closest thing of interest is a...
-            // ...tag
-            if let Some(tag_position) = closest_tag
-                && closest_tag
-                    < closest_inline_math
-                        .min(closest_display_math)
-                        .min(closest_code)
-            {
-                // go to it and start collecting it
-                position += tag_position; // dont skip #
-                collecting_tag = true;
-
-            // ...inline math block
-            } else if let Some(math_position) = closest_inline_math
-                && closest_inline_math < closest_display_math.min(closest_code)
-                // ...find its end
-                && let Some(next_inline_math) = find_inline_math(math_position + 1)
-            {
-                // ...and skip to after it
-                position += next_inline_math + 1;
-
-            // ...display math block
-            } else if let Some(math_position) = closest_display_math
-                && closest_display_math < closest_code
-                // ...find its end
-                && let Some(next_display_math) = find_display_math(math_position + 2)
-            {
-                // ...and skip to after it
-                position += next_display_math + 2;
-
-            // ...code block
-            } else if let Some(code_position) = closest_code
-                // ...find its end
-                && let Some(next_code) = find_code(code_position + 3)
-            {
-                // ...and skip to after it
-                position += next_code + 3;
-
-            // ... nothing
-            } else {
+                })
+            // stop if there arent any potential tags lfeft
+            else {
                 break;
+            };
+
+            match closest_inline_math
+                .min(closest_display_math)
+                .min(closest_code)
+                .min(closest_tag)
+            {
+                p if p == closest_tag => {
+                    // go to and start collecting the tag
+                    position += p + 1; // skip #
+                    collecting_tag = true;
+                }
+                p if p == closest_display_math => {
+                    let symbol_len = "$$".len();
+                    // skip the display math block
+                    let start = position + closest_display_math + symbol_len;
+                    let end = find_display_math(start);
+                    position = start + end + symbol_len;
+                }
+                p if p == closest_inline_math => {
+                    let symbol_len = "$".len();
+                    // skip the inline math block
+                    let start = position + closest_inline_math + symbol_len;
+                    let end = find_inline_math(start);
+                    position = start + end + symbol_len;
+                }
+                p if p == closest_code => {
+                    let symbol_len = "```".len();
+                    // skip the code block
+                    let start = position + closest_code + symbol_len;
+                    let end = find_code(start);
+                    position = start + end + symbol_len;
+                }
+                _ => unreachable!(),
             }
         }
     }
