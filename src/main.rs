@@ -5,7 +5,7 @@
 #![feature(iter_map_windows)]
 
 use std::{
-    array,
+    array, env,
     fmt::Write,
     fs,
     io::{self},
@@ -26,10 +26,14 @@ const IGNORE_PATHS: [&str; 1] = ["./Excalidraw"];
 async fn main() {
     env_logger::init();
     let client = reqwest::Client::new();
-    traverse(PathBuf::from("."), &client).await.unwrap();
+    let deck = env::args()
+        .skip(1)
+        .next()
+        .expect("The deck name should be passed as the first argument");
+    traverse(PathBuf::from("."), &client, deck).await.unwrap();
 }
 
-async fn traverse(dir: PathBuf, client: &reqwest::Client) -> io::Result<()> {
+async fn traverse(dir: PathBuf, client: &reqwest::Client, deck: String) -> io::Result<()> {
     trace!("Recursing into dir {}", dir.display());
     for entry in dir.read_dir()?.flatten() {
         let path = entry.path();
@@ -39,13 +43,13 @@ async fn traverse(dir: PathBuf, client: &reqwest::Client) -> io::Result<()> {
                 .map(AsRef::<Path>::as_ref)
                 .contains(&path.as_path())
         {
-            Box::pin(traverse(path, client)).await?;
+            Box::pin(traverse(path, client, deck)).await?;
         // markdown file
         } else if path.is_file()
             && let Some(extension) = path.extension()
             && extension == "md"
         {
-            handle_md(&path, client).await?;
+            handle_md(&path, client, deck).await?;
         }
     }
 
@@ -58,7 +62,7 @@ enum Math {
     Display,
 }
 
-async fn handle_md(path: &Path, client: &reqwest::Client) -> io::Result<()> {
+async fn handle_md(path: &Path, client: &reqwest::Client, deck: String) -> io::Result<()> {
     debug!("Handling Markdown file {}", path.display());
     let mut file_contents = fs::read_to_string(path)?
         .into_chars()
@@ -119,8 +123,7 @@ async fn handle_md(path: &Path, client: &reqwest::Client) -> io::Result<()> {
                                 write!(current_text, " > {heading}").unwrap();
                             }
                         }
-                        // if there are any tags (>1 because)
-                        if tags.len() > 1 {
+                        if !tags.is_empty() {
                             current_text.push('\n');
                         }
                         for tag in &tags {
@@ -159,7 +162,7 @@ async fn handle_md(path: &Path, client: &reqwest::Client) -> io::Result<()> {
                             i += mock_note_id.len();
                         // add new note
                         } else {
-                            match add_cloze_note(current_text, Vec::new(), client).await {
+                            match add_cloze_note(current_text, Vec::new(), deck, client).await {
                                 Ok(note_id) => {
                                     let index = i.min(file_contents.len());
                                     file_contents.splice(index..index, format_note_id(note_id.0));
@@ -364,6 +367,10 @@ fn collect_tags(contents: &[char]) -> Vec<String> {
         }
     }
 
+    // remove last element if empty
+    if out.last().map(|last| last.is_empty()) == Some(true) {
+        out.pop();
+    }
     out
 }
 

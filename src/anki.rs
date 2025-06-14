@@ -12,7 +12,6 @@ use tokio::time::sleep;
 // and model <-> fields could be linked, but we dont really need it here and
 // it would complicate the serialization
 
-const DECK: &str = "Obsidian";
 const MAX_BACKOFF: u8 = 5;
 
 #[derive(Serialize, Debug)]
@@ -151,12 +150,13 @@ pub struct NoteId(pub u64);
 pub async fn add_cloze_note(
     text: String,
     tags: Vec<String>,
+    deck: String,
     client: &reqwest::Client,
 ) -> Result<NoteId, String> {
-    ensure_deck_exists(client).await?;
+    ensure_deck_exists(client, deck).await?;
 
     let note = AddNote {
-        deck_name: DECK.to_string(),
+        deck_name: deck,
         model_name: "Cloze".to_string(),
         fields: HashMap::from([
             ("Text".to_string(), text.clone()),
@@ -224,14 +224,12 @@ pub async fn update_cloze_note(
 }
 
 /// Ensures that the deck `DECK` exists
-async fn ensure_deck_exists(client: &reqwest::Client) -> Result<(), String> {
+async fn ensure_deck_exists(client: &reqwest::Client, deck: String) -> Result<(), String> {
     let request = Request {
         // create deck won't overwrite
         action: Action::CreateDeck,
         version: 6,
-        params: CreateDeck {
-            deck: DECK.to_string(),
-        },
+        params: CreateDeck { deck },
     };
     request.request(client).await.map(|_: u64| {})
 }
