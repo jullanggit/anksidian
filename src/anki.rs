@@ -67,7 +67,7 @@ impl<P: Serialize + Debug> Request<P> {
 enum Action {
     AddNote,
     CreateDeck,
-    UpdateNoteFields,
+    UpdateNote,
     FindNotes,
 }
 
@@ -211,7 +211,7 @@ pub async fn update_cloze_note(
         tags,
     };
     let request = Request {
-        action: Action::UpdateNoteFields,
+        action: Action::UpdateNote,
         version: 6,
         params: Note { note },
     };
