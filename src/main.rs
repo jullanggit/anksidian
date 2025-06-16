@@ -319,9 +319,12 @@ fn collect_tags(contents: &[char]) -> Vec<String> {
             let closest_code = find_code(position);
             let Some(closest_tag) = contents[position..]
                 .iter()
-                .map_windows(|chars: &[&char; 2]| *chars)
+                .map_windows(|chars: &[&char; 3]| *chars)
                 .position(|chars| {
-                    chars[0] == &'#' && !chars[1].is_whitespace() && chars[1] != &'#'
+                    *chars[1] != '\n'
+                        && *chars[1] == '#'
+                        && !chars[2].is_whitespace()
+                        && *chars[2] != '#'
                 })
             // stop if there arent any potential tags lfeft
             else {
