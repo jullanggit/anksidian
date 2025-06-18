@@ -171,7 +171,7 @@ async fn handle_md(path: &Path, client: &reqwest::Client, deck: String) -> io::R
 
                     contains_cloze = false;
                     // headings
-                    possible_heading = 2;
+                    possible_heading = 2; // 2 so it gets decremented to 1 at the end of the loop
                     capturing_heading = false;
                     heading_level = 0;
 
@@ -229,7 +229,7 @@ async fn handle_md(path: &Path, client: &reqwest::Client, deck: String) -> io::R
             // headings
             [Some('#'), _, _] if possible_heading == 1 => {
                 heading_level += 1;
-                possible_heading = 2;
+                possible_heading = 2; // 2 so it gets decremented to 1 at the end of the loop
                 new_heading = true;
             }
             [Some(' '), _, _] if heading_level > 0 && !capturing_heading => {
