@@ -82,7 +82,7 @@ async fn handle_md(path: &Path, client: &reqwest::Client, deck: String) -> io::R
     // code
     let mut in_code = false;
     // headings
-    let mut possible_heading: u8 = 1;
+    let mut possible_heading: u8 = 1; // 1 = true, 0 = false, can be 2 temporarily
     let mut capturing_heading = false;
     let mut heading_level = 0;
     let mut headings: Vec<String> = Vec::new();
@@ -171,7 +171,7 @@ async fn handle_md(path: &Path, client: &reqwest::Client, deck: String) -> io::R
 
                     contains_cloze = false;
                     // headings
-                    possible_heading = 1;
+                    possible_heading = 2;
                     capturing_heading = false;
                     heading_level = 0;
 
@@ -227,7 +227,7 @@ async fn handle_md(path: &Path, client: &reqwest::Client, deck: String) -> io::R
                 i += 1
             }
             // headings
-            [Some('#'), _, _] if possible_heading > 0 => {
+            [Some('#'), _, _] if possible_heading == 1 => {
                 heading_level += 1;
                 possible_heading = 2;
                 new_heading = true;
@@ -260,7 +260,7 @@ async fn handle_md(path: &Path, client: &reqwest::Client, deck: String) -> io::R
             }
         }
         i += 1;
-        possible_heading.saturating_sub(1);
+        possible_heading = possible_heading.saturating_sub(1);
     }
     if file_changed {
         fs::write(path, file_contents.into_iter().collect::<String>())
