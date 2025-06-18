@@ -83,7 +83,7 @@ struct CreateDeck {
     deck: String,
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 struct AddNote {
     deck_name: String,
@@ -118,14 +118,14 @@ struct UpdateNote {
     tags: Vec<String>,
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 struct Options {
     allow_duplicate: bool,
     duplicate_scope: DuplicateScope,
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 enum DuplicateScope {
     Deck,
@@ -171,7 +171,7 @@ pub async fn add_cloze_note(
     let request = Request {
         action: Action::AddNote,
         version: 6,
-        params: Note { note: &note },
+        params: Note { note: note.clone() },
     };
 
     let result = request.request(client).await;

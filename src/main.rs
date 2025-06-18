@@ -16,7 +16,7 @@ use std::{
 
 use anki::{NoteId, add_cloze_note, update_cloze_note};
 use log::{debug, error, trace};
-use tokio::{io::AsyncWriteExt, process::Command};
+use tokio::{io::AsyncWriteExt, process::Command, task::JoinHandle};
 
 mod anki;
 
@@ -29,10 +29,22 @@ async fn main() {
     let deck = env::args()
         .nth(1)
         .expect("The deck name should be passed as the first argument");
-    traverse(PathBuf::from("."), &client, deck).await.unwrap();
+    let mut tasks = Vec::new();
+    traverse(PathBuf::from("."), client, deck, &mut tasks)
+        .await
+        .unwrap();
+
+    for task in tasks {
+        task.await.unwrap().unwrap();
+    }
 }
 
-async fn traverse(dir: PathBuf, client: &reqwest::Client, deck: String) -> io::Result<()> {
+async fn traverse(
+    dir: PathBuf,
+    client: reqwest::Client,
+    deck: String,
+    tasks: &mut Vec<JoinHandle<io::Result<()>>>,
+) -> io::Result<()> {
     trace!("Recursing into dir {}", dir.display());
     for entry in dir.read_dir()?.flatten() {
         let path = entry.path();
@@ -42,13 +54,13 @@ async fn traverse(dir: PathBuf, client: &reqwest::Client, deck: String) -> io::R
                 .map(AsRef::<Path>::as_ref)
                 .contains(&path.as_path())
         {
-            Box::pin(traverse(path, client, deck.clone())).await?;
+            Box::pin(traverse(path, client.clone(), deck.clone(), tasks)).await?;
         // markdown file
         } else if path.is_file()
             && let Some(extension) = path.extension()
             && extension == "md"
         {
-            handle_md(&path, client, deck.clone()).await?;
+            tasks.push(tokio::spawn(handle_md(path, client.clone(), deck.clone())));
         }
     }
 
@@ -61,9 +73,9 @@ enum Math {
     Display,
 }
 
-async fn handle_md(path: &Path, client: &reqwest::Client, deck: String) -> io::Result<()> {
+async fn handle_md(path: PathBuf, client: reqwest::Client, deck: String) -> io::Result<()> {
     debug!("Handling Markdown file {}", path.display());
-    let mut file_contents = fs::read_to_string(path)?
+    let mut file_contents = fs::read_to_string(&path)?
         .into_chars()
         .collect::<Vec<char>>();
     let mut file_changed = false;
@@ -144,7 +156,7 @@ async fn handle_md(path: &Path, client: &reqwest::Client, deck: String) -> io::R
                                 current_text,
                                 NoteId(note_id),
                                 tags.clone(),
-                                client,
+                                &client,
                             )
                             .await;
                             if let Err(e) = result {
@@ -154,7 +166,7 @@ async fn handle_md(path: &Path, client: &reqwest::Client, deck: String) -> io::R
                             i += mock_note_id.len();
                         // add new note
                         } else {
-                            match add_cloze_note(current_text, tags.clone(), deck.clone(), client)
+                            match add_cloze_note(current_text, tags.clone(), deck.clone(), &client)
                                 .await
                             {
                                 Ok(note_id) => {
