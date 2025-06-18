@@ -27,6 +27,6 @@ Supported are:
 - hash files
 - handle renamed hyperlinks
 - warn on unclosed highlight
-- parallel file handeling
+- parallel file handeling (not really effective)
 
 ![](https://brainmade.org/black-logo.svg)
