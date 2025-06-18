@@ -321,7 +321,7 @@ fn collect_tags(contents: &[char]) -> Vec<String> {
                 .iter()
                 .map_windows(|chars: &[&char; 3]| *chars)
                 .position(|chars| {
-                    *chars[1] != '\n'
+                    *chars[0] == '\n'
                         && *chars[1] == '#'
                         && !chars[2].is_whitespace()
                         && *chars[2] != '#'
