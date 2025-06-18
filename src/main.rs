@@ -12,11 +12,12 @@ use std::{
     mem,
     path::{Path, PathBuf},
     process::Stdio,
+    sync::{Arc, Mutex},
 };
 
 use anki::{NoteId, add_cloze_note, update_cloze_note};
 use log::{debug, error, trace};
-use tokio::{io::AsyncWriteExt, process::Command, task::JoinHandle};
+use tokio::{io::AsyncWriteExt, process::Command, task::JoinSet};
 
 mod anki;
 
@@ -29,13 +30,13 @@ async fn main() {
     let deck = env::args()
         .nth(1)
         .expect("The deck name should be passed as the first argument");
-    let mut tasks = Vec::new();
-    traverse(PathBuf::from("."), client, deck, &mut tasks)
-        .await
-        .unwrap();
+    let tasks = Arc::new(Mutex::new(JoinSet::new()));
+    let traverse = tokio::spawn(traverse(PathBuf::from("."), client, deck, tasks.clone()));
 
-    for task in tasks {
-        task.await.unwrap().unwrap();
+    while !traverse.is_finished() || !tasks.lock().unwrap().is_empty() {
+        if let Some(task) = tasks.lock().unwrap().try_join_next() {
+            task.unwrap().unwrap();
+        }
     }
 }
 
@@ -43,7 +44,7 @@ async fn traverse(
     dir: PathBuf,
     client: reqwest::Client,
     deck: String,
-    tasks: &mut Vec<JoinHandle<io::Result<()>>>,
+    tasks: Arc<Mutex<JoinSet<io::Result<()>>>>,
 ) -> io::Result<()> {
     trace!("Recursing into dir {}", dir.display());
     for entry in dir.read_dir()?.flatten() {
@@ -54,13 +55,16 @@ async fn traverse(
                 .map(AsRef::<Path>::as_ref)
                 .contains(&path.as_path())
         {
-            Box::pin(traverse(path, client.clone(), deck.clone(), tasks)).await?;
+            Box::pin(traverse(path, client.clone(), deck.clone(), tasks.clone())).await?;
         // markdown file
         } else if path.is_file()
             && let Some(extension) = path.extension()
             && extension == "md"
         {
-            tasks.push(tokio::spawn(handle_md(path, client.clone(), deck.clone())));
+            tasks
+                .lock()
+                .unwrap()
+                .spawn(handle_md(path, client.clone(), deck.clone()));
         }
     }
 
