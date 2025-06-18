@@ -12,12 +12,16 @@ use std::{
     mem,
     path::{Path, PathBuf},
     process::Stdio,
-    sync::{Arc, Mutex},
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
+    time::Duration,
 };
 
 use anki::{NoteId, add_cloze_note, update_cloze_note};
 use log::{debug, error, trace};
-use tokio::{io::AsyncWriteExt, process::Command, task::JoinSet};
+use tokio::{io::AsyncWriteExt, process::Command};
 
 mod anki;
 
@@ -30,13 +34,20 @@ async fn main() {
     let deck = env::args()
         .nth(1)
         .expect("The deck name should be passed as the first argument");
-    let tasks = Arc::new(Mutex::new(JoinSet::new()));
-    let traverse = tokio::spawn(traverse(PathBuf::from("."), client, deck, tasks.clone()));
+    // start with 1 for traverse
+    let task_count = Arc::new(AtomicU64::new(1));
+    {
+        let task_count = Arc::clone(&task_count);
+        tokio::spawn(async move {
+            traverse(PathBuf::from("."), client, deck, Arc::clone(&task_count))
+                .await
+                .unwrap();
+            task_count.fetch_sub(1, Ordering::Relaxed)
+        });
+    }
 
-    while !traverse.is_finished() || !tasks.lock().unwrap().is_empty() {
-        if let Some(task) = tasks.lock().unwrap().try_join_next() {
-            task.unwrap().unwrap();
-        }
+    while task_count.load(Ordering::Relaxed) != 0 {
+        tokio::time::sleep(Duration::from_millis(10)).await;
     }
 }
 
@@ -44,7 +55,7 @@ async fn traverse(
     dir: PathBuf,
     client: reqwest::Client,
     deck: String,
-    tasks: Arc<Mutex<JoinSet<io::Result<()>>>>,
+    task_count: Arc<AtomicU64>,
 ) -> io::Result<()> {
     trace!("Recursing into dir {}", dir.display());
     for entry in dir.read_dir()?.flatten() {
@@ -55,16 +66,26 @@ async fn traverse(
                 .map(AsRef::<Path>::as_ref)
                 .contains(&path.as_path())
         {
-            Box::pin(traverse(path, client.clone(), deck.clone(), tasks.clone())).await?;
+            Box::pin(traverse(
+                path,
+                client.clone(),
+                deck.clone(),
+                Arc::clone(&task_count),
+            ))
+            .await?;
         // markdown file
         } else if path.is_file()
             && let Some(extension) = path.extension()
             && extension == "md"
         {
-            tasks
-                .lock()
-                .unwrap()
-                .spawn(handle_md(path, client.clone(), deck.clone()));
+            task_count.fetch_add(1, Ordering::Relaxed);
+            let client = client.clone();
+            let deck = deck.clone();
+            let task_count = Arc::clone(&task_count);
+            tokio::spawn(async move {
+                handle_md(path, client, deck).await.unwrap();
+                task_count.fetch_sub(1, Ordering::Relaxed);
+            });
         }
     }
 
