@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
     env,
-    fs::{File, OpenOptions},
+    fs::{self, File, OpenOptions},
     io::{self, BufWriter, Read},
     path::{Path, PathBuf},
 };
@@ -74,6 +74,10 @@ impl FileCache {
     }
     fn save(&self) {
         let path = Self::get_path();
+        let parent = path.parent().expect("Path should have a parent");
+        if !parent.exists() {
+            fs::create_dir_all(parent);
+        }
         let file = BufWriter::new(
             OpenOptions::new()
                 .read(false)
