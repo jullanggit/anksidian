@@ -76,12 +76,14 @@ impl FileCache {
         let path = Self::get_path();
         let parent = path.parent().expect("Path should have a parent");
         if !parent.exists() {
-            fs::create_dir_all(parent);
+            fs::create_dir_all(parent).expect("Failed to create parent path");
         }
         let file = BufWriter::new(
             OpenOptions::new()
                 .read(false)
                 .write(true)
+                .create(true)
+                .truncate(true)
                 .open(path)
                 .expect("Failed to open file cache for saving"),
         );
