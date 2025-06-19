@@ -50,7 +50,7 @@ impl FileCache {
             env::var("XDG_CACHE_HOME")
                 .or_else(|_| {
                     env::var("HOME").map(|mut home| {
-                        home.push_str(".cache");
+                        home.push_str("/.cache");
                         home
                     })
                 })
@@ -67,9 +67,7 @@ impl FileCache {
             Self::default()
         } else {
             let file = File::open_buffered(&path).expect("Failed to open file cache");
-            Self {
-                hashes: serde_json::from_reader(file).expect("Failed to deserialize file cache"),
-            }
+            serde_json::from_reader(file).expect("Failed to deserialize file cache")
         }
     }
     fn save(&self) {
