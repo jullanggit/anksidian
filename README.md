@@ -18,7 +18,10 @@ Supported are:
   - language
     - typst
     - latex
-- Obsidian-style hyperlinks (just get removed)
+- Obsidian-style hyperlinks, including renamed hyperlinks ([[link|SomeRename]])
+- tags (#tag)
+  - All tags in a file get added as Anki tags for all clozes in the file
+  - Tags have to be at the start of separate lines
 
 ## Example
 - can be found in `test.md`
@@ -26,6 +29,6 @@ Supported are:
 ## TODO
 - hash files
 - warn on unclosed highlight
-- parallel file handeling (not really effective)
+- parallel file handling (not really effective)
 
 ![](https://brainmade.org/black-logo.svg)
