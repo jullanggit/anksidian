@@ -27,7 +27,6 @@ Supported are:
 - can be found in `test.md`
 
 ## TODO
-- hash files
 - warn on unclosed highlight
 - parallel file handling (not really effective)
 
