@@ -2,7 +2,7 @@
 
 ## Definition
 
-- Change of ==[[volume]]/length== in response to ==change of
+- Change of ==[[volume|Volume]]/length== in response to ==change of
 [[temperature]]==
 
 ## Formula

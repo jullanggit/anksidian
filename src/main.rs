@@ -87,6 +87,9 @@ async fn handle_md(path: &Path, client: &reqwest::Client, deck: String) -> io::R
     let mut heading_level = 0;
     let mut headings: Vec<String> = Vec::new();
     let mut new_heading = false;
+    // links
+    let mut in_link = false;
+    let mut link_text = String::new();
 
     // push the character to current/math text, based on math
     let mut i = 0;
@@ -223,8 +226,22 @@ async fn handle_md(path: &Path, client: &reqwest::Client, deck: String) -> io::R
                 }
                 Some(Math::Display) => math_text.push('$'),
             },
-            [Some('['), Some('['), _] | [Some(']'), Some(']'), _] if math.is_none() && !in_code => {
-                i += 1
+            // links
+            [Some('['), Some('['), _] if math.is_none() && !in_code => {
+                // skip both brackets
+                i += 1;
+                in_link = true;
+            }
+            // renamed link
+            [Some('|'), _, _] if in_link => {
+                link_text.clear();
+            }
+            [Some(']'), Some(']'), _] if in_link => {
+                // skip both brackets
+                i += 1;
+                // push link text
+                current_text.push_str(&mem::take(&mut link_text));
+                in_link = false;
             }
             // headings
             [Some('#'), _, _] if possible_heading == 1 => {
@@ -253,6 +270,8 @@ async fn handle_md(path: &Path, client: &reqwest::Client, deck: String) -> io::R
                 }
                 if math.is_some() {
                     &mut math_text
+                } else if in_link {
+                    &mut link_text
                 } else {
                     &mut current_text
                 }

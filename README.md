@@ -25,7 +25,6 @@ Supported are:
 
 ## TODO
 - hash files
-- handle renamed hyperlinks
 - warn on unclosed highlight
 - parallel file handeling (not really effective)
 
