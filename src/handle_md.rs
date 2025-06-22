@@ -267,7 +267,10 @@ fn collect_tags(contents: &[char]) -> Vec<String> {
                     )
                     .push(char);
             }
-            position += 1;
+            // dont skip newline as we need it for the tag matcher
+            if char != '\n' {
+                position += 1;
+            }
         } else {
             let find_inline_math = |position| {
                 contents[position..]
