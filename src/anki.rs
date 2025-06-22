@@ -99,7 +99,15 @@ impl AddNote {
             write!(
                 out,
                 " \"{field}:{}\"",
-                value.replace('\\', "\\\\").replace(':', "\\:")
+                value
+                    .replace('\\', "\\\\")
+                    .replace(':', "\\:")
+                    // html
+                    .replace("<br>", "\0") // avoid replacing < and >
+                    .replace('&', "&amp;")
+                    .replace('<', "&lt;")
+                    .replace('>', "&gt;")
+                    .replace('\0', "<br>") // reinsert
             )
             .unwrap();
         }
