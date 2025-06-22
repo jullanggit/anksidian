@@ -103,9 +103,7 @@ impl AddNote {
             )
             .unwrap();
         }
-        for tag in &self.tags {
-            write!(out, " tag:\"{tag}\"").unwrap();
-        }
+        // TODO: if it becoes an issue add back tag searching, first with then without
         out
     }
 }
