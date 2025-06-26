@@ -1,0 +1,21 @@
+file = { SOI ~ (cloze_lines | heading | tag | (!cloze_lines+ ~ ANY))* ~ EOI }
+
+heading = { "#"+ ~ " " ~ (!NEWLINE ~ ANY)* ~ NEWLINE }
+
+tag = { "#" ~ !("#" | " " | NEWLINE) ~ (!NEWLINE ~ ANY)+ ~ NEWLINE }
+
+cloze = { "==" ~ (!"==" ~ ANY)+ ~ "==" }
+// also mathes pure clozes
+cloze_lines          = { not_cloze_or_newline* ~ cloze ~ (not_cloze_or_newline | cloze)* }
+not_cloze_or_newline = { !(cloze | "\n") ~ (code | math | link | ANY) }
+
+code           = { multiline_code | inline_code }
+multiline_code = { "```" ~ (!"```" ~ ANY)* ~ "```" }
+inline_code    = { "`" ~ (!"`" ~ ANY)* ~ "`" }
+
+math         = { inline_math | display_math }
+inline_math  = { "$" ~ (!"$" ~ ANY)+ ~ "$" }
+display_math = { "$$" ~ (!"$$" ~ ANY)+ ~ "$$" }
+
+link        = { "[[" ~ (!("]]" | NEWLINE | "|") ~ ANY)+ ~ link_rename? ~ "]]" }
+link_rename = { "|" ~ (!("]]" | NEWLINE) ~ ANY)+ }
