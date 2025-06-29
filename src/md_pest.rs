@@ -33,14 +33,16 @@ pub async fn handle_md(path: &Path, client: &reqwest::Client, deck: &str) {
     let mut headings = Vec::new();
     let mut clozes = Vec::new();
 
-    match parsed.as_rule() {
-        Rule::heading => handle_heading(parsed.as_str(), &mut headings),
-        // remove trailing newline, then push
-        Rule::tag => tags.push(parsed.as_str().trim_end()),
-        Rule::cloze_lines => handle_cloze_lines(parsed, &headings, &mut clozes, &path_str).await,
-        // ignore EOI, as well as code, math & links outside of cloze lines
-        Rule::code | Rule::math | Rule::link | Rule::EOI => {}
-        other => unreachable!("{other:?}"),
+    for pair in parsed.into_inner() {
+        match pair.as_rule() {
+            Rule::heading => handle_heading(pair.as_str(), &mut headings),
+            // remove trailing newline, then push
+            Rule::tag => tags.push(pair.as_str().trim_end()),
+            Rule::cloze_lines => handle_cloze_lines(pair, &headings, &mut clozes, &path_str).await,
+            // ignore EOI, as well as code, math & links outside of cloze lines
+            Rule::code | Rule::math | Rule::link | Rule::EOI => {}
+            other => unreachable!("{other:?}"),
+        }
     }
 
     let mut last_read = 0;
