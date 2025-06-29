@@ -29,5 +29,6 @@ Supported are:
 ## TODO
 - warn on unclosed highlight
 - parallel file handling (not really effective)
+- handle errors with thiserror
 
 ![](https://brainmade.org/black-logo.svg)

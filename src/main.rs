@@ -16,7 +16,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::handle_md::handle_md;
+use crate::md_pest::handle_md;
 
 mod anki;
 mod handle_md;
@@ -133,13 +133,13 @@ async fn traverse(
                 Some(deck_cache) => {
                     // file isn't in cache or hashes don't match
                     if deck_cache.get(&path) != Some(&file_hash) {
-                        handle_md(&path, client, deck.clone()).await?;
+                        handle_md(&path, client, &deck).await;
                         deck_cache.insert(path, file_hash);
                     }
                 }
                 // deck is not in cache
                 None => {
-                    handle_md(&path, client, deck.clone()).await?;
+                    handle_md(&path, client, &deck.clone()).await;
                     file_cache
                         .hashes
                         .insert(deck.clone(), HashMap::from([(path, file_hash)]));

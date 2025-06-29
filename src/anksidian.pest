@@ -4,12 +4,14 @@ heading = { "#"+ ~ " " ~ (!NEWLINE ~ ANY)* ~ NEWLINE }
 
 tag = { "#" ~ !("#" | " " | NEWLINE) ~ (!(NEWLINE | " ") ~ ANY)+ ~ NEWLINE }
 
-cloze = { "==" ~ (!"==" ~ ANY)+ ~ "==" }
-// also matches pure clozes
+cloze = { "==" ~ (!"==" ~ (math | link | character))+ ~ "==" }
+
 /// Lines containing at least one cloze.
+// also matches pure clozes
 cloze_lines          = { not_cloze_or_newline* ~ cloze ~ (not_cloze_or_newline | cloze)* ~ (NEWLINE ~ note_id_comment)? }
-not_cloze_or_newline = { !(cloze | "\n") ~ (code | math | link | ANY) }
-note_id_comment      = { "<!--" ~ ASCII_DIGIT+ ~ "-->" }
+not_cloze_or_newline = { !(cloze | "\n") ~ (code | math | link | character) }
+note_id_comment      = { "<!--" ~ ascii_digits ~ "-->" ~ NEWLINE? }
+ascii_digits         = { ASCII_BIN_DIGIT+ }
 
 code           = { multiline_code | inline_code }
 multiline_code = { "```" ~ (!"```" ~ ANY)* ~ "```" }
@@ -21,3 +23,6 @@ display_math = { "$$" ~ (!"$$" ~ ANY)+ ~ "$$" }
 
 link        = { "[[" ~ (!("]]" | NEWLINE | "|") ~ ANY)+ ~ link_rename? ~ "]]" }
 link_rename = { "|" ~ (!("]]" | NEWLINE) ~ ANY)+ }
+
+/// Same as ANY, but shows up in the list of children spans
+character = { ANY }
