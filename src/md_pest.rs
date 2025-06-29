@@ -2,7 +2,7 @@ use crate::anki::{NoteId, add_cloze_note, update_cloze_note};
 use log::{debug, error};
 use pest::{Parser, iterators::Pair};
 use pest_derive::Parser;
-use std::{fmt::Write as _, fs, io, path::Path, process::Stdio};
+use std::{cmp::Ordering, fmt::Write as _, fs, io, path::Path, process::Stdio};
 use tokio::{io::AsyncWriteExt, process::Command};
 
 #[derive(Parser)]
@@ -94,20 +94,24 @@ fn handle_heading<'i>(str: &'i str, headings: &mut Vec<&'i str>) {
 
     let contents = &str[level + 1..];
 
-    match level as isize - headings.len() as isize {
-        -1 => {
+    match level.cmp(&headings.len()) {
+        Ordering::Less => {
             headings.pop();
+            headings.truncate(level);
             headings[level - 1] = contents
         }
-        0 => headings[level - 1] = contents,
-        1 => {
+        Ordering::Equal => headings[level - 1] = contents,
+        Ordering::Greater => {
+            assert!(
+                level == headings.len() + 1,
+                "headings are only allowed to increase 1 level at a time"
+            );
             headings.push(contents);
         }
-        other => unreachable!("heading level(s) skipped: current - new: {other}"),
     }
 }
 
-async fn handle_cloze_lines<'i, 'p>(
+async fn handle_cloze_lines<'i>(
     pair: Pair<'i, Rule>,
     headings: &[&'i str],
     // (contents, id, end)
