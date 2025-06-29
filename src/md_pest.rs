@@ -102,10 +102,10 @@ fn handle_heading<'i>(str: &'i str, headings: &mut Vec<&'i str>) {
         }
         Ordering::Equal => headings[level - 1] = contents,
         Ordering::Greater => {
-            assert!(
-                level == headings.len() + 1,
-                "headings are only allowed to increase 1 level at a time"
-            );
+            // empty headings will be filtered out when writing path
+            for _ in 0..level - headings.len() {
+                headings.push(Default::default());
+            }
             headings.push(contents);
         }
     }
@@ -171,7 +171,9 @@ async fn handle_cloze_lines<'i>(
     string.push_str("<br>");
     string.push_str(path_str);
     for heading in headings {
-        write!(string, " > {heading}").unwrap();
+        if !heading.is_empty() {
+            write!(string, " > {heading}").unwrap();
+        }
     }
 
     clozes.push((string, note_id, end));
