@@ -1,6 +1,7 @@
 use crate::anki::{NoteId, add_cloze_note, update_cloze_note};
 use log::{debug, error};
-use std::{cmp::Ordering, fmt::Write, fs, path::Path};
+use std::{cmp::Ordering, fmt::Write, fs, io, path::Path, process::Stdio};
+use tokio::{io::AsyncWriteExt, process::Command};
 use tparse::*;
 
 // file
@@ -12,60 +13,80 @@ type File = AllConsumed<Vec<FileElement>>;
 Or! {Newline, Cr = TStr<"\r">, Lf = TStr<"\n">, CrLF = TStr<"\r\n">}
 
 // heading
-Concat! {NotNewline, IsNot<Newline>, char}
-Concat! {Heading, VecN<1, TStr<"#">>, TStr<" ">, Vec<NotNewline>, Newline}
+type Heading = (
+    VecN<1, TStr<"#">>,
+    TStr<" ">,
+    Vec<(IsNot<Newline>, char)>,
+    Newline,
+);
 
 // tag
-Concat! {Tag, TStr<"#">, TagSpacing, VecN<1, TagNameChar>, Newline}
-// tag spacing
+type Tag = (
+    TStr<"#">,
+    (IsNot<NotTagSpacing>, char),
+    VecN<1, (IsNot<DisallowedInTag>, char)>,
+    Newline,
+);
 Or! {NotTagSpacing, HashTag = TStr<"#">, Space = TStr<" ">, Newline = Newline}
-Concat! {TagSpacing, IsNot<NotTagSpacing>, char}
-// tag name
-Or! {NotTagContents, Space = TStr<" ">, Newline = Newline}
-Concat! {TagNameChar, IsNot<NotTagContents>, char}
+Or! {DisallowedInTag, Space = TStr<" ">, Newline = Newline}
 
 // Cloze
 Or! {Element, Code = Code, Math = Math, Link = Link, Char = char}
-Concat! {NotClozeEnd, IsNot<TStr<"==">>, Element}
-Concat! {Cloze, TStr<"==">, VecN<1, NotClozeEnd>,TStr<"==">}
+type Cloze = (
+    TStr<"==">,
+    VecN<1, (IsNot<TStr<"==">>, Element)>,
+    TStr<"==">,
+);
 
 Or! {ClozeOrNewline, Cloze = Cloze, Newline = Newline}
-Concat! {NotClozeOrNewline, IsNot<ClozeOrNewline>, Element}
-Concat! {NotNewlineElement, IsNot<Newline>, Element}
-Or! {NotNewlineElementOrCloze, NotNewlineElement = NotNewlineElement, Cloze = Cloze}
-Concat! {ClozeLines, Vec<NotClozeOrNewline>, Cloze, Vec<NotNewlineElementOrCloze>, Option<NoteIdComment>}
+Or! {NotNewlineElementOrCloze, NotNewlineElement = (IsNot<Newline>, Element), Cloze = Cloze}
+type ClozeLines = (
+    Vec<(IsNot<ClozeOrNewline>, Element)>,
+    Cloze,
+    Vec<NotNewlineElementOrCloze>,
+    Option<NoteIdComment>,
+);
 
 // note id comment
 const NOTE_ID_COMMENT_START: &str = "<!--NoteID:";
 const NOTE_ID_COMMENT_END: &str = "-->";
-Concat! {NoteIdComment, Newline, TStr<NOTE_ID_COMMENT_START>, VecN<10, RangedChar<'0', '9'>>, TStr<NOTE_ID_COMMENT_END>, Option<Newline>}
+type NoteIdComment = (
+    Newline,
+    TStr<NOTE_ID_COMMENT_START>,
+    VecN<10, RangedChar<'0', '9'>>,
+    TStr<NOTE_ID_COMMENT_END>,
+    Option<Newline>,
+);
 
 // code
 Or! {Code, Inline = InlineCode, Multiline = MultilineCode}
 // inline code
-Concat! {NotInlineCodeEnd, IsNot<TStr<"`">>, char}
-Concat! {InlineCode, TStr<"`">, VecN<1, NotInlineCodeEnd>, TStr<"`">}
+type InlineCode = (TStr<"`">, VecN<1, (IsNot<TStr<"`">>, char)>, TStr<"`">);
 // display code
-Concat! {NotMultilineCodeEnd, IsNot<TStr<"```">>, char}
-Concat! {MultilineCode, TStr<"```">, VecN<1, NotMultilineCodeEnd>, TStr<"```">}
+type MultilineCode = (
+    TStr<"```">,
+    VecN<1, (IsNot<TStr<"```">>, char)>,
+    TStr<"```">,
+);
 
 // math
 Or! {Math, Inline = InlineMath, Display = DisplayMath}
 // inline math
-Concat! {NotInlineMathEnd, IsNot<TStr<"$">>, char}
-Concat! {InlineMath, TStr<"$">, VecN<1, NotInlineMathEnd>, TStr<"$">}
+type InlineMath = (TStr<"$">, VecN<1, (IsNot<TStr<"$">>, char)>, TStr<"$">);
 // display math
-Concat! {NotDisplayMathEnd, IsNot<TStr<"$$">>, char}
-Concat! {DisplayMath, TStr<"$$">, VecN<1, NotDisplayMathEnd>, TStr<"$$">}
+type DisplayMath = (TStr<"$$">, VecN<1, (IsNot<TStr<"$$">>, char)>, TStr<"$$">);
 
 // Link
 Or! {DisallowedInLink, ClosingBrackets = TStr<"]]">, Newline = Newline, Pipe = TStr<"|">}
-Concat! {AllowedInLink, IsNot<DisallowedInLink>, char}
-Concat! {Link, TStr<"[[">, VecN<1, AllowedInLink>, Option<LinkRename>, TStr<"]]">}
+type Link = (
+    TStr<"[[">,
+    VecN<1, (IsNot<DisallowedInLink>, char)>,
+    Option<LinkRename>,
+    TStr<"]]">,
+);
 // LinkRename
 Or! {DisallowedInLinkRename, ClosingBrackets = TStr<"]]">, Newline = Newline}
-Concat! {AllowedInLinkRename, IsNot<DisallowedInLinkRename>, char}
-Concat! {LinkRename, VecN<1, AllowedInLinkRename>}
+type LinkRename = VecN<1, (IsNot<DisallowedInLinkRename>, char)>;
 
 pub async fn handle_md(path: &Path, client: &reqwest::Client, deck: &str) {
     /// the approximate length of a note id comment in bytes.
@@ -170,29 +191,29 @@ fn handle_heading(heading: Heading, headings: &mut Vec<String>) {
 
 impl ToString for Code {
     fn to_string(&self) -> String {
-        match &self {
-            Code::Inline(inline_code) => inline_code.to_string(),
-            Code::Multiline(multiline_code) => multiline_code.to_string(),
+        let inline_fn = |code: &(TStr<_>, VecN<1, (IsNot<TStr<_>>, char)>, TStr<_>)| {
+            format!(
+                "{}{}{}",
+                code.0.str(),
+                code.1.0.iter().map(|char| char.1).collect::<String>(),
+                code.2.str()
+            )
+        };
+        let multiline_fn = |code: &(TStr<_>, VecN<1, (IsNot<TStr<_>>, char)>, TStr<_>)| {
+            format!(
+                "{}{}{}",
+                code.0.str(),
+                code.1.0.iter().map(|char| char.1).collect::<String>(),
+                code.2.str()
+            )
+        };
+
+        match self {
+            Code::Inline(inline) => inline_fn(inline),
+            Code::Multiline(multiline) => multiline_fn(multiline),
         }
     }
 }
-macro_rules! impl_to_string_for_code {
-    ($($ty:ident),+) => {
-        $(
-            impl ToString for $ty {
-                fn to_string(&self) -> String {
-                    format!(
-                        "{}{}{}",
-                        self.0.str(),
-                        self.1.0.iter().map(|char| char.1).collect::<String>(),
-                        self.2.str()
-                    )
-                }
-            }
-        )+
-    };
-}
-impl_to_string_for_code!(InlineCode, MultilineCode);
 
 async fn handle_cloze_lines<'i>(
     cloze_lines: ClozeLines,
@@ -205,11 +226,11 @@ async fn handle_cloze_lines<'i>(
     let mut cloze_num: u8 = 0;
     let mut note_id = None;
 
-    for NotClozeOrNewline(_, element) in cloze_lines.0 {
+    for (_, element) in cloze_lines.0 {
         match element {
             Element::Code(code) => string.push_str(&code.to_string()),
             Element::Math(math) => string.push_str(&math.convert().await.unwrap()), // TODO: handle errors
-            Element::Link(link) => string.push_str(&link.to_string()),
+            Element::Link(link) => string.push_str(&link_to_string(link)),
             Element::Char(char) => string.push(char),
         }
     }
@@ -267,50 +288,47 @@ async fn handle_cloze_lines<'i>(
     clozes.push((string, note_id, end));
 }
 
-fn handle_link<'i>(pair: Pair<'i, Rule>) -> &'i str {
-    assert!(pair.as_rule() == Rule::link);
-
-    let str = pair.as_str();
-
-    if let Some(rename) = pair.into_inner().next() {
-        &rename.as_str()[1..]
+fn link_to_string(link: Link) -> String {
+    fn to_string<T: TParse>(vec: VecN<1, (IsNot<T>, char)>) -> String {
+        vec.0.into_iter().map(|char| char.1).collect::<String>()
+    }
+    if let Some(rename) = link.2 {
+        to_string(rename)
     } else {
-        &str[2..str.len() - 2]
+        to_string(link.1)
     }
 }
 
-/// Convert from Obsidian latex/typst to anki latex
-async fn convert_math<'i>(pair: Pair<'i, Rule>) -> io::Result<String> {
-    assert!(pair.as_rule() == Rule::math);
+impl Math {
+    /// Convert from Obsidian latex/typst to anki latex
+    async fn convert(&self) -> io::Result<String> {
+        // extract inner math
+        fn extract<T>(math: &(T, VecN<1, (T, char)>, T)) -> String {
+            math.1.0.iter().map(|char| char.1).collect()
+        }
+        let inner = match self {
+            Self::Inline(inner) => extract(inner),
+            Self::Display(inner) => extract(inner),
+        };
+        let typst_style_math = match self {
+            Self::Inline(_) => format!("${inner}$"),
+            Self::Display(_) => format!("$ {inner} $"),
+        };
 
-    let str = pair.as_str();
-
-    let inline = pair
-        .into_inner()
-        .next()
-        .expect("Math always has either a display or an inline child")
-        .as_rule()
-        == Rule::inline_math;
-
-    // extract inner math
-    let offset = if inline { 1 } else { 2 };
-    let str = &str[offset..str.len() - offset];
-
-    let typst_style_math = if inline {
-        format!("${str}$")
-    } else {
-        format!("$ {str} $")
-    };
-    if is_typst(&typst_style_math).await? {
-        typst_to_latex(&typst_style_math).await
-    } else {
-        Ok(if inline {
-            format!("\\({str}\\)")
+        if is_typst(&typst_style_math).await? {
+            typst_to_latex(&typst_style_math).await
         } else {
-            format!("\\[{str}\\]")
-        })
+            Ok(match self {
+                Self::Inline(_) => {
+                    format!("\\({inner}\\)")
+                }
+                Self::Display(_) => {
+                    format!("\\[{inner}\\]")
+                }
+            })
+        }
+        .map(|string| string.replace("}}", "} }")) // avoid confusing anki
     }
-    .map(|string| string.replace("}}", "} }")) // avoid confusing anki
 }
 
 async fn is_typst(math: &str) -> io::Result<bool> {
