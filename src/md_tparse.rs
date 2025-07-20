@@ -155,8 +155,12 @@ pub async fn handle_md(path: &Path, client: &reqwest::Client, deck: &str) {
                     // insert note id comments by copying the old file and interleaving the comments
                     let index = str.len().min(end + 1);
                     out_string.push_str(&str[last_read..index]);
-                    writeln!(out_string, "<!--NoteID:{}-->", note_id.0)
-                        .expect("Writing to out_string shouldn't fail");
+                    writeln!(
+                        out_string,
+                        "{}{}{}",
+                        NOTE_ID_COMMENT_START, note_id.0, NOTE_ID_COMMENT_END
+                    )
+                    .expect("Writing to out_string shouldn't fail");
 
                     last_read = index;
                 }
@@ -223,57 +227,49 @@ async fn handle_cloze_lines<'i>(
     path_str: &str,
 ) {
     let mut string = String::new();
-    let mut cloze_num: u8 = 0;
-    let mut note_id = None;
-
-    for (_, element) in cloze_lines.0 {
+    let handle_element = |element: Element| async {
         match element {
             Element::Code(code) => string.push_str(&code.to_string()),
             Element::Math(math) => string.push_str(&math.convert().await.unwrap()), // TODO: handle errors
             Element::Link(link) => string.push_str(&link_to_string(link)),
             Element::Char(char) => string.push(char),
         }
+    };
+    for (_, element) in cloze_lines.0 {
+        handle_element(element).await
     }
-    for pair in pair.into_inner() {
-        match pair.as_rule() {
-            Rule::cloze => {
-                cloze_num += 1;
 
-                write!(string, "{{{{c{cloze_num}::").unwrap();
-                for inner_pair in pair.into_inner() {
-                    match inner_pair.as_rule() {
-                        Rule::math => string.push_str(&convert_math(inner_pair).await.unwrap()), // TODO: handle errors
-                        Rule::link => string.push_str(handle_link(inner_pair)),
-                        Rule::character => string.push_str(inner_pair.as_str()),
-                        other => unreachable!("{other:?}"),
-                    }
-                }
-                string.push_str("}}");
-            }
-            Rule::not_cloze_or_newline => {
-                let inner_pair = pair
-                    .into_inner()
-                    .next()
-                    .expect("not_cloze_or_newline should always have children");
-                match inner_pair.as_rule() {
-                    Rule::character | Rule::code => string.push_str(inner_pair.as_str()),
-                    Rule::math => string.push_str(&convert_math(inner_pair).await.unwrap()), // TODO: handle errors
-                    Rule::link => string.push_str(handle_link(inner_pair)),
-                    other => unreachable!("{other:?}"),
-                }
-            }
-            Rule::note_id_comment => {
-                note_id = Some(
-                    pair.into_inner()
-                        .next()
-                        .expect("note_id_comments always has an ascii_digits child")
-                        .as_str()
-                        .parse()
-                        .expect("parsing note id shouldn't fail"),
-                )
-            }
-            other => unreachable!("{other:?}"),
+    let mut cloze_num: u8 = 0;
+    let mut note_id = None;
+
+    let add_cloze = |cloze: Cloze| async {
+        cloze_num += 1;
+
+        write!(string, "{{{{c{cloze_num}::").unwrap();
+        for (_, element) in cloze.1.0 {
+            handle_element(element).await
         }
+        string.push_str("}}");
+    };
+    add_cloze(cloze_lines.1);
+
+    for element_or_cloze in cloze_lines.2 {
+        match element_or_cloze {
+            NotNewlineElementOrCloze::NotNewlineElement((_, element)) => {
+                handle_element(element).await
+            }
+            NotNewlineElementOrCloze::Cloze(cloze) => add_cloze(cloze).await,
+        }
+    }
+    if let Some(note_id_comment) = cloze_lines.3 {
+        note_id = Some(note_id_comment.2.0.into_iter().fold(0u64, |acc, digit| {
+            acc * 10
+                + digit
+                    .0
+                    .to_digit(10)
+                    .expect("We use RangedChar 0..=9, so there are only valid digits")
+                    as u64
+        }));
     }
 
     // append path & headings
