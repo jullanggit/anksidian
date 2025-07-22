@@ -160,9 +160,9 @@ pub async fn handle_md(path: &Path, client: &reqwest::Client, deck: &str) {
                     // insert note id comments by copying the old file and interleaving the comments
                     let index = str.len() - remaining_length;
                     out_string.push_str(&str[last_read..index]);
-                    writeln!(
+                    write!(
                         out_string,
-                        "{}{}{}",
+                        "\n{}{}{}",
                         NOTE_ID_COMMENT_START, note_id.0, NOTE_ID_COMMENT_END
                     )
                     .expect("Writing to out_string shouldn't fail");
