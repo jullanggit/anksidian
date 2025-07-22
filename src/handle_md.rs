@@ -84,7 +84,8 @@ type InlineMath = (TStr<"$">, VecN<1, (IsNot<TStr<"$">>, char)>, TStr<"$">);
 type DisplayMath = (TStr<"$$">, VecN<1, (IsNot<TStr<"$$">>, char)>, TStr<"$$">);
 
 // Link
-Or! {DisallowedInLink, ClosingBrackets = TStr<"]]">, Newline = Newline, Pipe = TStr<"|">}
+type LinkRenameSeparator = TStr<"|">;
+Or! {DisallowedInLink, ClosingBrackets = TStr<"]]">, Newline = Newline, LinkRenameSeparator = LinkRenameSeparator}
 type Link = (
     TStr<"[[">,
     VecN<1, (IsNot<DisallowedInLink>, char)>,
@@ -93,7 +94,10 @@ type Link = (
 );
 // LinkRename
 Or! {DisallowedInLinkRename, ClosingBrackets = TStr<"]]">, Newline = Newline}
-type LinkRename = VecN<1, (IsNot<DisallowedInLinkRename>, char)>;
+type LinkRename = (
+    LinkRenameSeparator,
+    VecN<1, (IsNot<DisallowedInLinkRename>, char)>,
+);
 
 pub async fn handle_md(path: &Path, client: &reqwest::Client, deck: &str) {
     /// the approximate length of a note id comment in bytes.
@@ -300,7 +304,7 @@ fn link_to_string(link: Link) -> String {
         vec.0.into_iter().map(|char| char.1).collect::<String>()
     }
     if let Some(rename) = link.2 {
-        to_string(rename)
+        to_string(rename.1)
     } else {
         to_string(link.1)
     }
