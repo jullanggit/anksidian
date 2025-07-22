@@ -27,14 +27,8 @@ type Heading = (
 );
 
 // tag
-type Tag = (
-    TStr<"#">,
-    (IsNot<NotTagSpacing>, char),
-    VecN<1, (IsNot<DisallowedInTag>, char)>,
-    Newline,
-);
-Or! {NotTagSpacing, HashTag = TStr<"#">, Space = TStr<" ">, Newline = Newline}
-Or! {DisallowedInTag, Space = TStr<" ">, Newline = Newline}
+type Tag = (TStr<"#">, VecN<1, (IsNot<DisallowedInTag>, char)>, Newline);
+Or! {DisallowedInTag, HashTag = TStr<"#">, Space = TStr<" ">, Newline = Newline}
 
 // Cloze
 Or! {Element, Code = Code, Math = Math, Link = Link, Char = char}
@@ -45,11 +39,11 @@ type Cloze = (
 );
 
 Or! {ClozeOrNewline, Cloze = Cloze, Newline = Newline}
-Or! {NotNewlineElementOrCloze, NotNewlineElement = (IsNot<Newline>, Element), Cloze = Cloze}
+Or! {NotNewlineClozeOrElement, Cloze = Cloze, NotNewlineElement = (IsNot<Newline>, Element)}
 type ClozeLines = (
     Vec<(IsNot<ClozeOrNewline>, Element)>,
     Cloze,
-    Vec<NotNewlineElementOrCloze>,
+    Vec<NotNewlineClozeOrElement>,
     Option<NoteIdComment>,
     RemainingLength,
 );
@@ -127,7 +121,7 @@ pub async fn handle_md(path: &Path, client: &reqwest::Client, deck: &str) {
             }
             FileElement::Heading(heading) => handle_heading(heading, &mut headings),
             FileElement::Tag(tag) => {
-                tags.push(tag.2.0.into_iter().map(|char| char.1).collect::<String>())
+                tags.push(tag.1.0.into_iter().map(|char| char.1).collect::<String>())
             }
             FileElement::Code(_)
             | FileElement::Math(_)
@@ -266,10 +260,10 @@ async fn handle_cloze_lines(
 
     for element_or_cloze in cloze_lines.2 {
         match element_or_cloze {
-            NotNewlineElementOrCloze::NotNewlineElement((_, element)) => {
+            NotNewlineClozeOrElement::NotNewlineElement((_, element)) => {
                 handle_element(element, &mut string).await
             }
-            NotNewlineElementOrCloze::Cloze(cloze) => {
+            NotNewlineClozeOrElement::Cloze(cloze) => {
                 add_cloze(cloze, &mut string, &mut cloze_num).await
             }
         }
