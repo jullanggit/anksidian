@@ -1,6 +1,12 @@
 use crate::anki::{NoteId, add_cloze_note, update_cloze_note};
-use log::{debug, error};
-use std::{cmp::Ordering, fmt::Write, fs, io, path::Path, process::Stdio};
+use log::error;
+use std::{
+    cmp::Ordering,
+    fmt::{Display, Write},
+    fs, io,
+    path::Path,
+    process::Stdio,
+};
 use tokio::{io::AsyncWriteExt, process::Command};
 use tparse::*;
 
@@ -45,6 +51,7 @@ type ClozeLines = (
     Cloze,
     Vec<NotNewlineElementOrCloze>,
     Option<NoteIdComment>,
+    RemainingLength,
 );
 
 // note id comment
@@ -128,7 +135,7 @@ pub async fn handle_md(path: &Path, client: &reqwest::Client, deck: &str) {
     let mut last_read = 0;
     let mut out_string =
         String::with_capacity(str.len() + clozes.len() * APPROX_LEN_NOTE_ID_COMMENT);
-    for (contents, note_id, end) in clozes {
+    for (contents, note_id, remaining_length) in clozes {
         // update existing note
         if let Some(note_id) = note_id {
             let result = update_cloze_note(
@@ -153,7 +160,7 @@ pub async fn handle_md(path: &Path, client: &reqwest::Client, deck: &str) {
             {
                 Ok(note_id) => {
                     // insert note id comments by copying the old file and interleaving the comments
-                    let index = str.len().min(end + 1);
+                    let index = str.len() - remaining_length;
                     out_string.push_str(&str[last_read..index]);
                     writeln!(
                         out_string,
@@ -193,72 +200,74 @@ fn handle_heading(heading: Heading, headings: &mut Vec<String>) {
     }
 }
 
-impl ToString for Code {
-    fn to_string(&self) -> String {
-        let inline_fn = |code: &(TStr<_>, VecN<1, (IsNot<TStr<_>>, char)>, TStr<_>)| {
-            format!(
-                "{}{}{}",
-                code.0.str(),
-                code.1.0.iter().map(|char| char.1).collect::<String>(),
-                code.2.str()
-            )
-        };
-        let multiline_fn = |code: &(TStr<_>, VecN<1, (IsNot<TStr<_>>, char)>, TStr<_>)| {
-            format!(
-                "{}{}{}",
-                code.0.str(),
-                code.1.0.iter().map(|char| char.1).collect::<String>(),
-                code.2.str()
-            )
-        };
-
+impl Display for Code {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Code::Inline(inline) => inline_fn(inline),
-            Code::Multiline(multiline) => multiline_fn(multiline),
+            Code::Inline(code) => {
+                write!(
+                    f,
+                    "{}{}{}",
+                    code.0.str(),
+                    code.1.0.iter().map(|char| char.1).collect::<String>(),
+                    code.2.str()
+                )
+            }
+            Code::Multiline(code) => {
+                write!(
+                    f,
+                    "{}{}{}",
+                    code.0.str(),
+                    code.1.0.iter().map(|char| char.1).collect::<String>(),
+                    code.2.str()
+                )
+            }
         }
     }
 }
 
-async fn handle_cloze_lines<'i>(
+async fn handle_cloze_lines(
     cloze_lines: ClozeLines,
     headings: &[String],
-    // (contents, id, end)
+    // (contents, id, remaining_length)
     clozes: &mut Vec<(String, Option<u64>, usize)>,
     path_str: &str,
 ) {
-    let mut string = String::new();
-    let handle_element = |element: Element| async {
+    async fn handle_element(element: Element, string: &mut String) {
         match element {
             Element::Code(code) => string.push_str(&code.to_string()),
             Element::Math(math) => string.push_str(&math.convert().await.unwrap()), // TODO: handle errors
             Element::Link(link) => string.push_str(&link_to_string(link)),
             Element::Char(char) => string.push(char),
         }
-    };
+    }
+
+    let mut string = String::new();
     for (_, element) in cloze_lines.0 {
-        handle_element(element).await
+        handle_element(element, &mut string).await
     }
 
     let mut cloze_num: u8 = 0;
     let mut note_id = None;
 
-    let add_cloze = |cloze: Cloze| async {
-        cloze_num += 1;
+    async fn add_cloze(cloze: Cloze, string: &mut String, cloze_num: &mut u8) {
+        *cloze_num += 1;
 
         write!(string, "{{{{c{cloze_num}::").unwrap();
         for (_, element) in cloze.1.0 {
-            handle_element(element).await
+            handle_element(element, string).await
         }
         string.push_str("}}");
-    };
-    add_cloze(cloze_lines.1);
+    }
+    add_cloze(cloze_lines.1, &mut string, &mut cloze_num).await;
 
     for element_or_cloze in cloze_lines.2 {
         match element_or_cloze {
             NotNewlineElementOrCloze::NotNewlineElement((_, element)) => {
-                handle_element(element).await
+                handle_element(element, &mut string).await
             }
-            NotNewlineElementOrCloze::Cloze(cloze) => add_cloze(cloze).await,
+            NotNewlineElementOrCloze::Cloze(cloze) => {
+                add_cloze(cloze, &mut string, &mut cloze_num).await
+            }
         }
     }
     if let Some(note_id_comment) = cloze_lines.3 {
@@ -281,7 +290,9 @@ async fn handle_cloze_lines<'i>(
         }
     }
 
-    clozes.push((string, note_id, end));
+    let remaining_length = cloze_lines.4.0;
+
+    clozes.push((string, note_id, remaining_length));
 }
 
 fn link_to_string(link: Link) -> String {
@@ -299,7 +310,7 @@ impl Math {
     /// Convert from Obsidian latex/typst to anki latex
     async fn convert(&self) -> io::Result<String> {
         // extract inner math
-        fn extract<T>(math: &(T, VecN<1, (T, char)>, T)) -> String {
+        fn extract<T, U, V>(math: &(T, VecN<1, (U, char)>, V)) -> String {
             math.1.0.iter().map(|char| char.1).collect()
         }
         let inner = match self {
