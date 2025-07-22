@@ -1,372 +1,341 @@
 use crate::anki::{NoteId, add_cloze_note, update_cloze_note};
-use log::{debug, error};
+use log::error;
 use std::{
-    array,
-    fmt::Write as _,
-    fs,
-    io::{self},
-    mem,
+    cmp::Ordering,
+    fmt::{Display, Write},
+    fs, io,
     path::Path,
     process::Stdio,
 };
 use tokio::{io::AsyncWriteExt, process::Command};
+use tparse::*;
 
-#[derive(PartialEq, Clone, Copy)]
-enum Math {
-    Inline,
-    Display,
-}
+// file
+Or! {FileElement, ClozeLines = ClozeLines, Heading = Heading, Tag = Tag,
+Code = Code, Math = Math, Link = Link, Char = char}
+type File = AllConsumed<Vec<FileElement>>;
 
-pub async fn handle_md(path: &Path, client: &reqwest::Client, deck: String) -> io::Result<()> {
-    debug!("Handling Markdown file {}", path.display());
-    let mut file_contents = fs::read_to_string(path)?
-        .into_chars()
-        .collect::<Vec<char>>();
-    let mut file_changed = false;
+// newline
+Or! {Newline, Cr = TStr<"\r">, Lf = TStr<"\n">, CrLF = TStr<"\r\n">}
 
-    let tags = collect_tags(&file_contents);
+// heading
+type Heading = (
+    VecN<1, TStr<"#">>,
+    TStr<" ">,
+    Vec<(IsNot<Newline>, char)>,
+    Newline,
+);
 
-    // clozes
-    let mut contains_cloze = false;
-    let mut in_cloze = false;
-    let mut num_cloze = 1;
-    // text
-    let mut current_text = String::new();
-    // math
-    let mut math_text = String::new();
-    let mut math = None;
-    // code
-    let mut in_code = false;
-    // headings
-    let mut possible_heading: u8 = 1; // 1 = true, 0 = false, can be 2 temporarily
-    let mut capturing_heading = false;
-    let mut heading_level = 0;
-    let mut headings: Vec<String> = Vec::new();
-    let mut new_heading = false;
-    // links
-    let mut in_link = false;
-    let mut link_text = String::new();
+// tag
+type Tag = (
+    TStr<"#">,
+    (IsNot<NotTagSpacing>, char),
+    VecN<1, (IsNot<DisallowedInTag>, char)>,
+    Newline,
+);
+Or! {NotTagSpacing, HashTag = TStr<"#">, Space = TStr<" ">, Newline = Newline}
+Or! {DisallowedInTag, Space = TStr<" ">, Newline = Newline}
 
-    // push the character to current/math text, based on math
-    let mut i = 0;
-    loop {
-        let chars = array::from_fn(|offset| file_contents.get(i + offset).cloned());
-        match chars {
-            [Some('\n'), _, _] | [None, _, _] => {
-                if in_cloze || math.is_some() || in_code {
-                    current_text.push_str("<br>"); // anki linebreak
+// Cloze
+Or! {Element, Code = Code, Math = Math, Link = Link, Char = char}
+type Cloze = (
+    TStr<"==">,
+    VecN<1, (IsNot<TStr<"==">>, Element)>,
+    TStr<"==">,
+);
 
-                    // prevent infinite loop. Should enter the path below on the next loop
-                    if chars[0].is_none() {
-                        in_cloze = false;
-                        math = None;
-                    }
-                // outside of any special blocks
-                } else {
-                    num_cloze = 1;
+Or! {ClozeOrNewline, Cloze = Cloze, Newline = Newline}
+Or! {NotNewlineElementOrCloze, NotNewlineElement = (IsNot<Newline>, Element), Cloze = Cloze}
+type ClozeLines = (
+    Vec<(IsNot<ClozeOrNewline>, Element)>,
+    Cloze,
+    Vec<NotNewlineElementOrCloze>,
+    Option<NoteIdComment>,
+    RemainingLength,
+);
 
-                    let mut current_text = mem::take(&mut current_text);
-                    if contains_cloze && !current_text.is_empty() {
-                        // append path & headings
-                        current_text.push_str("<br>");
-                        let path_str = path
-                            .iter()
-                            .skip(1)
-                            .map(|part| part.to_string_lossy().to_string())
-                            .intersperse(" > ".to_owned())
-                            .collect::<String>();
-                        current_text.push_str(&path_str[..path_str.len() - 3]); // remove .md
-                        for heading in &headings {
-                            if !heading.is_empty() {
-                                write!(current_text, " > {heading}").unwrap();
-                            }
-                        }
+// note id comment
+const NOTE_ID_COMMENT_START: &str = "<!--NoteID:";
+const NOTE_ID_COMMENT_END: &str = "-->";
+type NoteIdComment = (
+    Newline,
+    TStr<NOTE_ID_COMMENT_START>,
+    VecN<10, RangedChar<'0', '9'>>,
+    TStr<NOTE_ID_COMMENT_END>,
+    Option<Newline>,
+);
 
-                        // handle note id
-                        let format_note_id =
-                            |id: u64| format!("\n<!--NoteID:{id}-->").into_chars().collect();
-                        let mock_note_id: Vec<char> = format_note_id(1000000000000); // should have the same length as normal ones
+// code
+Or! {Code, Inline = InlineCode, Multiline = MultilineCode}
+// inline code
+type InlineCode = (TStr<"`">, VecN<1, (IsNot<TStr<"`">>, char)>, TStr<"`">);
+// display code
+type MultilineCode = (
+    TStr<"```">,
+    VecN<1, (IsNot<TStr<"```">>, char)>,
+    TStr<"```">,
+);
 
-                        // if the potential id has the correct format
-                        if let Some(potential_id) = file_contents.get(i..i + mock_note_id.len())
-                            && potential_id[0..12] == mock_note_id[0..12]
-                            && potential_id[25..] == mock_note_id[25..]
-                        // update existing note
-                        {
-                            let note_id: u64 = potential_id[12..25]
-                                .iter()
-                                .collect::<String>()
-                                .parse()
-                                .unwrap();
+// math
+Or! {Math, Inline = InlineMath, Display = DisplayMath}
+// inline math
+type InlineMath = (TStr<"$">, VecN<1, (IsNot<TStr<"$">>, char)>, TStr<"$">);
+// display math
+type DisplayMath = (TStr<"$$">, VecN<1, (IsNot<TStr<"$$">>, char)>, TStr<"$$">);
 
-                            let result = update_cloze_note(
-                                current_text,
-                                NoteId(note_id),
-                                tags.clone(),
-                                client,
-                            )
-                            .await;
-                            if let Err(e) = result {
-                                error!("{e}");
-                            }
+// Link
+Or! {DisallowedInLink, ClosingBrackets = TStr<"]]">, Newline = Newline, Pipe = TStr<"|">}
+type Link = (
+    TStr<"[[">,
+    VecN<1, (IsNot<DisallowedInLink>, char)>,
+    Option<LinkRename>,
+    TStr<"]]">,
+);
+// LinkRename
+Or! {DisallowedInLinkRename, ClosingBrackets = TStr<"]]">, Newline = Newline}
+type LinkRename = VecN<1, (IsNot<DisallowedInLinkRename>, char)>;
 
-                            i += mock_note_id.len();
-                        // add new note
-                        } else {
-                            match add_cloze_note(current_text, tags.clone(), deck.clone(), client)
-                                .await
-                            {
-                                Ok(note_id) => {
-                                    let index = i.min(file_contents.len());
-                                    file_contents.splice(index..index, format_note_id(note_id.0));
+pub async fn handle_md(path: &Path, client: &reqwest::Client, deck: &str) {
+    /// the approximate length of a note id comment in bytes.
+    /// Right for the years 2001-2286
+    const APPROX_LEN_NOTE_ID_COMMENT: usize = "<!--NoteID:0000000000000-->\n".len();
 
-                                    file_changed = true;
-                                    i += mock_note_id.len();
-                                }
-                                Err(e) => error!("{e}"),
-                            }
-                        }
-                    }
+    let str = fs::read_to_string(path).expect("Reading file shouldnt fail");
 
-                    contains_cloze = false;
-                    // headings
-                    possible_heading = 2; // 2 so it gets decremented to 1 at the end of the loop
-                    capturing_heading = false;
-                    heading_level = 0;
+    let parsed = File::tparse(&str).expect("Parsing file shouldn't fail");
 
-                    if chars[0].is_none() {
-                        break;
-                    }
-                }
+    let mut path_str = path
+        .iter()
+        .skip(1)
+        .map(|part| part.to_string_lossy().to_string())
+        .intersperse(" > ".to_owned())
+        .collect::<String>();
+    path_str.truncate(path_str.len() - 3); // remove .md
+
+    let mut tags = Vec::new();
+    let mut headings = Vec::new();
+    let mut clozes = Vec::new();
+
+    for file_element in parsed.0.0 {
+        match file_element {
+            FileElement::ClozeLines(cloze_lines) => {
+                handle_cloze_lines(cloze_lines, &headings, &mut clozes, &path_str).await
             }
-            // code
-            [Some('`'), Some('`'), Some('`')] if math.is_none() => {
-                in_code = !in_code;
-                current_text.push('`'); // still push entire "```"
+            FileElement::Heading(heading) => handle_heading(heading, &mut headings),
+            FileElement::Tag(tag) => {
+                tags.push(tag.2.0.into_iter().map(|char| char.1).collect::<String>())
             }
-            // cloze
-            [Some('='), Some('='), _] if math.is_none() && !in_code => {
-                if in_cloze {
-                    current_text.push_str("}}");
-                } else {
-                    write!(current_text, "{{{{c{num_cloze}::").unwrap();
-                    num_cloze += 1;
-                }
-
-                // skip second '='
-                i += 1;
-                in_cloze = !in_cloze;
-                contains_cloze = true;
-            }
-            // math
-            [Some('$'), Some('$'), _] if !in_code => match math {
-                None => {
-                    math = Some(Math::Display);
-                    i += 1
-                }
-                Some(math_type) => {
-                    math = None;
-                    let converted = convert_math(&mem::take(&mut math_text), math_type).await?;
-                    current_text.push_str(&converted);
-                    if math_type == Math::Display {
-                        i += 1
-                    }
-                }
-            },
-            [Some('$'), _, _] if !in_code => match math {
-                None => math = Some(Math::Inline),
-                Some(Math::Inline) => {
-                    math = None;
-                    let converted = convert_math(&mem::take(&mut math_text), Math::Inline).await?;
-                    current_text.push_str(&converted);
-                }
-                Some(Math::Display) => math_text.push('$'),
-            },
-            // links
-            [Some('['), Some('['), _] if math.is_none() && !in_code => {
-                // skip both brackets
-                i += 1;
-                in_link = true;
-            }
-            // renamed link
-            [Some('|'), _, _] if in_link => {
-                link_text.clear();
-            }
-            [Some(']'), Some(']'), _] if in_link => {
-                // skip both brackets
-                i += 1;
-                // push link text
-                current_text.push_str(&mem::take(&mut link_text));
-                in_link = false;
-            }
-            // headings
-            [Some('#'), _, _] if possible_heading == 1 => {
-                heading_level += 1;
-                possible_heading = 2; // 2 so it gets decremented to 1 at the end of the loop
-                new_heading = true;
-            }
-            [Some(' '), _, _] if heading_level > 0 && !capturing_heading => {
-                capturing_heading = true;
-            }
-            [Some(other), _, _] => {
-                if capturing_heading {
-                    // adjust length
-                    if heading_level > headings.len() {
-                        for _ in 0..heading_level - headings.len() {
-                            headings.push(Default::default());
-                        }
-                    } else {
-                        headings.truncate(heading_level);
-                    }
-                    if new_heading {
-                        headings[heading_level - 1].clear();
-                        new_heading = false;
-                    }
-                    headings[heading_level - 1].push(other);
-                }
-                if math.is_some() {
-                    &mut math_text
-                } else if in_link {
-                    &mut link_text
-                } else {
-                    &mut current_text
-                }
-                .push(other)
-            }
+            FileElement::Code(_)
+            | FileElement::Math(_)
+            | FileElement::Link(_)
+            | FileElement::Char(_) => {}
         }
-        i += 1;
-        possible_heading = possible_heading.saturating_sub(1);
     }
-    if file_changed {
-        fs::write(path, file_contents.into_iter().collect::<String>())
-    } else {
-        Ok(())
-    }
-}
 
-// A tag is a # followed directly by a non-whitespace character.
-// Tags can be hierarchival with / as the delimiter, but we dont need to handle that specially
-fn collect_tags(contents: &[char]) -> Vec<String> {
-    let mut out = vec![String::new()];
-    let mut position = 0;
-    let mut collecting_tag = false;
-
-    while position < contents.len() {
-        if collecting_tag {
-            let char = contents[position];
-            // end of tag
-            if char.is_whitespace() {
-                // end current tag by pushing a new empty one
-                out.push(String::new());
-                collecting_tag = false;
-            } else {
-                out.last_mut()
-                    .expect(
-                        "There is always a last element because \
-                        out is initialised with one element and we never pop",
-                    )
-                    .push(char);
+    let mut last_read = 0;
+    let mut out_string =
+        String::with_capacity(str.len() + clozes.len() * APPROX_LEN_NOTE_ID_COMMENT);
+    for (contents, note_id, remaining_length) in clozes {
+        // update existing note
+        if let Some(note_id) = note_id {
+            let result = update_cloze_note(
+                contents,
+                NoteId(note_id),
+                tags.iter().map(ToString::to_string).collect(),
+                client,
+            )
+            .await;
+            if let Err(e) = result {
+                error!("{e}");
             }
-            // dont skip newline as we need it for the tag matcher
-            if char != '\n' {
-                position += 1;
-            }
+        // add new note
         } else {
-            let find_inline_math = |position| {
-                contents[position..]
-                    .iter()
-                    .position(|char| char == &'$')
-                    .unwrap_or(contents.len())
-            };
-            let find_display_math = |position| {
-                contents[position..]
-                    .iter()
-                    .map_windows(|chars| *chars)
-                    .position(|chars| chars == [&'$'; 2])
-                    .unwrap_or(contents.len())
-            };
-            let find_code = |position| {
-                contents[position..]
-                    .iter()
-                    .map_windows(|chars| *chars)
-                    .position(|chars| chars == [&'`'; 3])
-                    .unwrap_or(contents.len())
-            };
-            let closest_inline_math = find_inline_math(position);
-            let closest_display_math = find_display_math(position);
-            let closest_code = find_code(position);
-            let Some(closest_tag) = contents[position..]
-                .iter()
-                .map_windows(|chars: &[&char; 3]| *chars)
-                .position(|chars| {
-                    *chars[0] == '\n'
-                        && *chars[1] == '#'
-                        && !chars[2].is_whitespace()
-                        && *chars[2] != '#'
-                })
-            // stop if there arent any potential tags lfeft
-            else {
-                break;
-            };
-
-            match closest_inline_math
-                .min(closest_display_math)
-                .min(closest_code)
-                .min(closest_tag)
+            match add_cloze_note(
+                contents,
+                tags.iter().map(ToString::to_string).collect(),
+                deck.to_string(),
+                client,
+            )
+            .await
             {
-                p if p == closest_tag => {
-                    // go to and start collecting the tag
-                    position += p + 1; // skip #
-                    collecting_tag = true;
+                Ok(note_id) => {
+                    // insert note id comments by copying the old file and interleaving the comments
+                    let index = str.len() - remaining_length;
+                    out_string.push_str(&str[last_read..index]);
+                    writeln!(
+                        out_string,
+                        "{}{}{}",
+                        NOTE_ID_COMMENT_START, note_id.0, NOTE_ID_COMMENT_END
+                    )
+                    .expect("Writing to out_string shouldn't fail");
+
+                    last_read = index;
                 }
-                p if p == closest_display_math => {
-                    let symbol_len = "$$".len();
-                    // skip the display math block
-                    let start = position + closest_display_math + symbol_len;
-                    let end = find_display_math(start);
-                    position = start + end + symbol_len;
-                }
-                p if p == closest_inline_math => {
-                    let symbol_len = "$".len();
-                    // skip the inline math block
-                    let start = position + closest_inline_math + symbol_len;
-                    let end = find_inline_math(start);
-                    position = start + end + symbol_len;
-                }
-                p if p == closest_code => {
-                    let symbol_len = "```".len();
-                    // skip the code block
-                    let start = position + closest_code + symbol_len;
-                    let end = find_code(start);
-                    position = start + end + symbol_len;
-                }
-                _ => unreachable!(),
+                Err(e) => error!("{e}"),
             }
         }
     }
-
-    // remove last element if empty
-    if out.last().map(|last| last.is_empty()) == Some(true) {
-        out.pop();
-    }
-    out
+    out_string.push_str(&str[last_read..]);
+    fs::write(path, out_string).expect("Writing to file shouldn't fail");
 }
 
-/// Convert from Obsidian latex/typst to anki latex
-async fn convert_math(str: &str, math_type: Math) -> io::Result<String> {
-    let typst_style_math = match math_type {
-        Math::Inline => format!("${str}$"),
-        Math::Display => format!("$ {str} $"),
-    };
-    if is_typst(&typst_style_math).await? {
-        typst_to_latex(&typst_style_math).await
-    } else {
-        Ok(match math_type {
-            Math::Inline => format!("\\({str}\\)"),
-            Math::Display => format!("\\[{str}\\]"),
-        })
+fn handle_heading(heading: Heading, headings: &mut Vec<String>) {
+    let level = heading.0.0.len();
+    let contents = heading.2.into_iter().map(|char| char.1).collect::<String>();
+
+    match level.cmp(&headings.len()) {
+        Ordering::Less => {
+            headings.pop();
+            headings.truncate(level);
+            headings[level - 1] = contents
+        }
+        Ordering::Equal => headings[level - 1] = contents,
+        Ordering::Greater => {
+            // empty headings will be filtered out when writing path
+            for _ in 0..level - headings.len() {
+                headings.push(Default::default());
+            }
+            headings.push(contents);
+        }
     }
-    .map(|string| string.replace("}}", "} }")) // avoid confusing anki
+}
+
+impl Display for Code {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Code::Inline(code) => {
+                write!(
+                    f,
+                    "{}{}{}",
+                    code.0.str(),
+                    code.1.0.iter().map(|char| char.1).collect::<String>(),
+                    code.2.str()
+                )
+            }
+            Code::Multiline(code) => {
+                write!(
+                    f,
+                    "{}{}{}",
+                    code.0.str(),
+                    code.1.0.iter().map(|char| char.1).collect::<String>(),
+                    code.2.str()
+                )
+            }
+        }
+    }
+}
+
+async fn handle_cloze_lines(
+    cloze_lines: ClozeLines,
+    headings: &[String],
+    // (contents, id, remaining_length)
+    clozes: &mut Vec<(String, Option<u64>, usize)>,
+    path_str: &str,
+) {
+    async fn handle_element(element: Element, string: &mut String) {
+        match element {
+            Element::Code(code) => string.push_str(&code.to_string()),
+            Element::Math(math) => string.push_str(&math.convert().await.unwrap()), // TODO: handle errors
+            Element::Link(link) => string.push_str(&link_to_string(link)),
+            Element::Char(char) => string.push(char),
+        }
+    }
+
+    let mut string = String::new();
+    for (_, element) in cloze_lines.0 {
+        handle_element(element, &mut string).await
+    }
+
+    let mut cloze_num: u8 = 0;
+    let mut note_id = None;
+
+    async fn add_cloze(cloze: Cloze, string: &mut String, cloze_num: &mut u8) {
+        *cloze_num += 1;
+
+        write!(string, "{{{{c{cloze_num}::").unwrap();
+        for (_, element) in cloze.1.0 {
+            handle_element(element, string).await
+        }
+        string.push_str("}}");
+    }
+    add_cloze(cloze_lines.1, &mut string, &mut cloze_num).await;
+
+    for element_or_cloze in cloze_lines.2 {
+        match element_or_cloze {
+            NotNewlineElementOrCloze::NotNewlineElement((_, element)) => {
+                handle_element(element, &mut string).await
+            }
+            NotNewlineElementOrCloze::Cloze(cloze) => {
+                add_cloze(cloze, &mut string, &mut cloze_num).await
+            }
+        }
+    }
+    if let Some(note_id_comment) = cloze_lines.3 {
+        note_id = Some(note_id_comment.2.0.into_iter().fold(0u64, |acc, digit| {
+            acc * 10
+                + digit
+                    .0
+                    .to_digit(10)
+                    .expect("We use RangedChar 0..=9, so there are only valid digits")
+                    as u64
+        }));
+    }
+
+    // append path & headings
+    string.push_str("<br>");
+    string.push_str(path_str);
+    for heading in headings {
+        if !heading.is_empty() {
+            write!(string, " > {heading}").unwrap();
+        }
+    }
+
+    let remaining_length = cloze_lines.4.0;
+
+    clozes.push((string, note_id, remaining_length));
+}
+
+fn link_to_string(link: Link) -> String {
+    fn to_string<T: TParse>(vec: VecN<1, (IsNot<T>, char)>) -> String {
+        vec.0.into_iter().map(|char| char.1).collect::<String>()
+    }
+    if let Some(rename) = link.2 {
+        to_string(rename)
+    } else {
+        to_string(link.1)
+    }
+}
+
+impl Math {
+    /// Convert from Obsidian latex/typst to anki latex
+    async fn convert(&self) -> io::Result<String> {
+        // extract inner math
+        fn extract<T, U, V>(math: &(T, VecN<1, (U, char)>, V)) -> String {
+            math.1.0.iter().map(|char| char.1).collect()
+        }
+        let inner = match self {
+            Self::Inline(inner) => extract(inner),
+            Self::Display(inner) => extract(inner),
+        };
+        let typst_style_math = match self {
+            Self::Inline(_) => format!("${inner}$"),
+            Self::Display(_) => format!("$ {inner} $"),
+        };
+
+        if is_typst(&typst_style_math).await? {
+            typst_to_latex(&typst_style_math).await
+        } else {
+            Ok(match self {
+                Self::Inline(_) => {
+                    format!("\\({inner}\\)")
+                }
+                Self::Display(_) => {
+                    format!("\\[{inner}\\]")
+                }
+            })
+        }
+        .map(|string| string.replace("}}", "} }")) // avoid confusing anki
+    }
 }
 
 async fn is_typst(math: &str) -> io::Result<bool> {

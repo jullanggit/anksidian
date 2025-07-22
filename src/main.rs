@@ -16,12 +16,10 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::md_pest::handle_md;
+use crate::handle_md::handle_md;
 
 mod anki;
 mod handle_md;
-mod md_pest;
-mod md_tparse;
 
 const IGNORE_PATHS: [&str; 1] = ["./Excalidraw"];
 
