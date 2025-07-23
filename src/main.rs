@@ -14,26 +14,36 @@ use std::{
     fs::{self, File, OpenOptions},
     io::{self, BufWriter, Read},
     path::{Path, PathBuf},
+    sync::OnceLock,
 };
 
-use crate::handle_md::handle_md;
+use crate::{anki::initialize_notes, handle_md::handle_md};
 
 mod anki;
 mod handle_md;
+
+static DECK: OnceLock<String> = OnceLock::new();
 
 const IGNORE_PATHS: [&str; 1] = ["./Excalidraw"];
 
 #[tokio::main]
 async fn main() {
+    DECK.set(
+        env::args()
+            .nth(1)
+            .expect("The deck name should be passed as the first argument"),
+    )
+    .expect("DECK should'nt be initialized yet");
+
     env_logger::init();
+
     let client = reqwest::Client::new();
-    let deck = env::args()
-        .nth(1)
-        .expect("The deck name should be passed as the first argument");
+    initialize_notes(&client).await;
+
     let mut file_cache = FileCache::load();
     // let file = File::open(cache)
     // let file_cache = serde_json::from_reader(rdr)
-    traverse(PathBuf::from("."), &client, deck, &mut file_cache)
+    traverse(PathBuf::from("."), &client, &mut file_cache)
         .await
         .unwrap();
     file_cache.save();
@@ -108,7 +118,6 @@ fn hash_file(path: &Path) -> Hash {
 async fn traverse(
     dir: PathBuf,
     client: &reqwest::Client,
-    deck: String,
     file_cache: &mut FileCache,
 ) -> io::Result<()> {
     trace!("Recursing into dir {}", dir.display());
@@ -120,25 +129,26 @@ async fn traverse(
                 .map(AsRef::<Path>::as_ref)
                 .contains(&path.as_path())
         {
-            Box::pin(traverse(path, client, deck.clone(), file_cache)).await?;
+            Box::pin(traverse(path, client, file_cache)).await?;
         // markdown file
         } else if path.is_file()
             && let Some(extension) = path.extension()
             && extension == "md"
         {
+            let deck = DECK.get().expect("DECK should be initialized");
             let file_hash = hash_file(&path);
-            match file_cache.hashes.get_mut(&deck) {
+            match file_cache.hashes.get_mut(deck) {
                 // deck is in cache
                 Some(deck_cache) => {
                     // file isn't in cache or hashes don't match
                     if deck_cache.get(&path) != Some(&file_hash) {
-                        handle_md(&path, client, &deck).await;
+                        handle_md(&path, client).await;
                         deck_cache.insert(path, file_hash);
                     }
                 }
                 // deck is not in cache
                 None => {
-                    handle_md(&path, client, &deck.clone()).await;
+                    handle_md(&path, client).await;
                     file_cache
                         .hashes
                         .insert(deck.clone(), HashMap::from([(path, file_hash)]));

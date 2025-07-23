@@ -1,11 +1,9 @@
 use log::{debug, warn};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
-use std::{
-    collections::HashMap,
-    fmt::{Debug, Write},
-    time::Duration,
-};
+use std::{collections::HashMap, fmt::Debug, sync::OnceLock, time::Duration};
 use tokio::time::sleep;
+
+use crate::DECK;
 
 // Handles interaction with AnkiConnect.
 // Could maybe use a bit more type-safety, stuff like action <-> params,
@@ -13,12 +11,14 @@ use tokio::time::sleep;
 // it would complicate the serialization
 
 const MAX_BACKOFF: u8 = 5;
+// UpdateNote, because it contains all information we need and can be converted to an AddNote with only defaultable values missing
+pub static NOTES: OnceLock<Vec<UpdateNote>> = OnceLock::new();
 
 #[derive(Serialize, Debug)]
 #[serde(rename_all = "camelCase")]
 struct Request<P: Serialize + Debug> {
     action: Action,
-    version: u8,
+    version: u8, // i would like to use the nightly `= 6` here, but serde doesnt yet support this
     params: P,
 }
 impl<P: Serialize + Debug> Request<P> {
@@ -66,9 +66,9 @@ impl<P: Serialize + Debug> Request<P> {
 #[serde(rename_all = "camelCase")]
 enum Action {
     AddNote,
-    CreateDeck,
     UpdateNote,
-    FindNotes,
+    NotesInfo,
+    CreateDeck,
 }
 
 #[derive(Serialize, Debug)]
@@ -92,35 +92,12 @@ struct AddNote {
     options: Options,
     tags: Vec<String>,
 }
-impl AddNote {
-    fn to_query(&self) -> String {
-        let mut out = format!("deck:\"{}\" note:\"{}\"", self.deck_name, self.model_name);
-        for (field, value) in &self.fields {
-            write!(
-                out,
-                " \"{field}:{}\"",
-                value
-                    .replace('\\', "\\\\")
-                    .replace(':', "\\:")
-                    // html
-                    .replace("<br>", "\0") // avoid replacing < and >
-                    .replace('&', "&amp;")
-                    .replace('<', "&lt;")
-                    .replace('>', "&gt;")
-                    .replace('\0', "<br>") // reinsert
-            )
-            .unwrap();
-        }
-        // TODO: if it becoes an issue add back tag searching, first with then without
-        out
-    }
-}
 
 #[derive(Serialize, Debug)]
 #[serde(rename_all = "camelCase")]
-struct UpdateNote {
-    id: NoteId,
-    fields: HashMap<String, String>,
+pub struct UpdateNote {
+    pub id: NoteId,
+    pub fields: HashMap<String, String>,
     tags: Vec<String>,
 }
 
@@ -148,21 +125,70 @@ struct Response<T> {
     error: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[serde(transparent)]
 /// Contains a Unix Timestamp (so 13 decimal digits for the years 2001-2286)
 pub struct NoteId(pub u64);
 
+pub async fn initialize_notes(client: &reqwest::Client) {
+    #[derive(Deserialize, Debug)]
+    #[serde(rename_all = "camelCase")]
+    struct Field {
+        value: String,
+        // not needed:
+        // order: u8,
+    }
+    #[derive(Deserialize, Debug)]
+    #[serde(rename_all = "camelCase")]
+    struct NotesInfoNote {
+        note_id: NoteId,
+        model_name: String,
+        tags: Vec<String>,
+        fields: HashMap<String, Field>, // not needed:
+                                        // profile: String,
+                                        // mod: u64,
+                                        // cards: Vec<u64>,
+    }
+
+    let request = Request {
+        action: Action::NotesInfo,
+        version: 6,
+        params: Query {
+            query: format!(
+                "\"deck:{}\"",
+                DECK.get().expect("DECK should be initialized")
+            ),
+        },
+    };
+    let result: Vec<NotesInfoNote> = request
+        .request(client)
+        .await
+        .expect("Request should'nt fail");
+
+    NOTES
+        .set(
+            result
+                .into_iter()
+                .filter(|note| note.model_name == "Cloze")
+                .map(|note| UpdateNote {
+                    id: note.note_id,
+                    fields: note.fields.into_iter().map(|(k, v)| (k, v.value)).collect(),
+                    tags: note.tags,
+                })
+                .collect(),
+        )
+        .expect("NOTES shouldn't be initialized yet");
+}
+
 pub async fn add_cloze_note(
     text: String,
     tags: Vec<String>,
-    deck: String,
     client: &reqwest::Client,
 ) -> Result<NoteId, String> {
-    ensure_deck_exists(client, deck.clone()).await?;
+    ensure_deck_exists(client).await?;
 
     let note = AddNote {
-        deck_name: deck.clone(),
+        deck_name: DECK.get().expect("DECK should be initialized").clone(),
         model_name: "Cloze".to_string(),
         fields: HashMap::from([
             ("Text".to_string(), text.clone()),
@@ -180,26 +206,7 @@ pub async fn add_cloze_note(
         params: Note { note: &note },
     };
 
-    let result = request.request(client).await;
-
-    // handle duplicate note
-    match result {
-        Err(e) if &e == "cannot create note because it is a duplicate" => {
-            let query = note.to_query();
-            let request = Request {
-                action: Action::FindNotes,
-                version: 6,
-                params: Query { query },
-            };
-
-            return Ok(*request
-                .request::<Vec<_>>(client)
-                .await?
-                .first()
-                .expect("Note should exist, if it is a duplicate"));
-        }
-        other => other,
-    }
+    request.request(client).await
 }
 
 pub async fn update_cloze_note(
@@ -230,12 +237,14 @@ pub async fn update_cloze_note(
 }
 
 /// Ensures that the deck `DECK` exists
-async fn ensure_deck_exists(client: &reqwest::Client, deck: String) -> Result<(), String> {
+async fn ensure_deck_exists(client: &reqwest::Client) -> Result<(), String> {
     let request = Request {
         // create deck won't overwrite
         action: Action::CreateDeck,
         version: 6,
-        params: CreateDeck { deck },
+        params: CreateDeck {
+            deck: DECK.get().expect("DECK should be initialized").clone(),
+        },
     };
     request.request(client).await.map(|_: u64| {})
 }

@@ -1,4 +1,4 @@
-use crate::anki::{NoteId, add_cloze_note, update_cloze_note};
+use crate::anki::{NOTES, add_cloze_note, update_cloze_note};
 use log::error;
 use std::{
     cmp::Ordering,
@@ -93,7 +93,7 @@ type LinkRename = (
     VecN<1, (IsNot<DisallowedInLinkRename>, char)>,
 );
 
-pub async fn handle_md(path: &Path, client: &reqwest::Client, deck: &str) {
+pub async fn handle_md(path: &Path, client: &reqwest::Client) {
     /// the approximate length of a note id comment in bytes.
     /// Right for the years 2001-2286
     const APPROX_LEN_NOTE_ID_COMMENT: usize = "<!--NoteID:0000000000000-->\n".len();
@@ -134,42 +134,73 @@ pub async fn handle_md(path: &Path, client: &reqwest::Client, deck: &str) {
     let mut out_string =
         String::with_capacity(str.len() + clozes.len() * APPROX_LEN_NOTE_ID_COMMENT);
     for (contents, note_id, remaining_length) in clozes {
-        // update existing note
-        if let Some(note_id) = note_id {
-            let result = update_cloze_note(
-                contents,
-                NoteId(note_id),
-                tags.iter().map(ToString::to_string).collect(),
-                client,
-            )
-            .await;
-            if let Err(e) = result {
-                error!("{e}");
-            }
-        // add new note
-        } else {
-            match add_cloze_note(
-                contents,
-                tags.iter().map(ToString::to_string).collect(),
-                deck.to_string(),
-                client,
-            )
-            .await
-            {
-                Ok(note_id) => {
-                    // insert note id comments by copying the old file and interleaving the comments
-                    let index = str.len() - remaining_length;
-                    out_string.push_str(&str[last_read..index]);
-                    write!(
-                        out_string,
-                        "\n{}{}{}",
-                        NOTE_ID_COMMENT_START, note_id.0, NOTE_ID_COMMENT_END
-                    )
-                    .expect("Writing to out_string shouldn't fail");
+        let notes = NOTES.get().expect("Notes should be initialized");
+        let actual_note_id = notes
+            .iter()
+            .find(|note| {
+                note_id.is_some_and(|id| id == note.id.0) || note.fields["Text"] == contents
+            })
+            .map(|note| note.id);
 
-                    last_read = index;
+        let final_id = match actual_note_id {
+            // update existing note
+            Some(note_id) => {
+                let result = update_cloze_note(
+                    contents,
+                    note_id,
+                    tags.iter().map(ToString::to_string).collect(),
+                    client,
+                )
+                .await;
+                if let Err(e) = result {
+                    error!("{e}");
+                    None
+                } else {
+                    Some(note_id)
                 }
-                Err(e) => error!("{e}"),
+            }
+            // add new note
+            None => {
+                match add_cloze_note(
+                    contents,
+                    tags.iter().map(ToString::to_string).collect(),
+                    client,
+                )
+                .await
+                {
+                    Ok(note_id) => Some(note_id),
+                    Err(e) => {
+                        error!("{e}");
+                        None
+                    }
+                }
+            }
+        };
+        let index = str.len() - remaining_length;
+        out_string.push_str(&str[last_read..index]);
+        last_read = index;
+        match (note_id, final_id) {
+            // dont change anything
+            (_, None) => {}
+            // write new id
+            (None, Some(id_to_write)) => {
+                write!(
+                    out_string,
+                    "\n{}{}{}",
+                    NOTE_ID_COMMENT_START, id_to_write.0, NOTE_ID_COMMENT_END
+                )
+                .expect("Writing to out_string shouldn't fail");
+            }
+            // replace old id
+            (Some(previous_id), Some(new_id)) => {
+                let previous_id_string = previous_id.to_string();
+                let start_previous_id = out_string
+                    .rfind(&previous_id_string)
+                    .expect("Previous ID should be present");
+                out_string.replace_range(
+                    start_previous_id..start_previous_id + previous_id_string.len(),
+                    &new_id.0.to_string(),
+                );
             }
         }
     }
