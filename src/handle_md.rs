@@ -29,7 +29,7 @@ type Heading = (
 );
 
 // tag
-type Tag = (TStr<"#">, VecN<1, (IsNot<DisallowedInTag>, char)>, Newline);
+type Tag = (TStr<"#">, VecN<1, (IsNot<DisallowedInTag>, char)>);
 Or! {DisallowedInTag, HashTag = TStr<"#">, Space = TStr<" ">, Newline = Newline}
 
 // Cloze
@@ -122,9 +122,13 @@ pub async fn handle_md(path: &Path) {
                 handle_cloze_lines(cloze_lines, &headings, &mut clozes, &path_str).await
             }
             FileElement::Heading(heading) => handle_heading(heading, &mut headings),
-            FileElement::Tag(tag) => {
-                tags.push(tag.1.0.into_iter().map(|char| char.1).collect::<String>())
-            }
+            FileElement::Tag(tag) => tags.push(
+                tag.0
+                    .str()
+                    .chars()
+                    .chain(tag.1.0.into_iter().map(|char| char.1))
+                    .collect::<String>(),
+            ),
             FileElement::Code(_)
             | FileElement::Math(_)
             | FileElement::Link(_)
