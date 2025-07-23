@@ -1,7 +1,7 @@
 use log::{debug, warn};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
-use std::{collections::HashMap, fmt::Debug, sync::LazyLock, time::Duration};
-use tokio::{runtime::Handle, time::sleep};
+use std::{collections::HashMap, fmt::Debug, time::Duration};
+use tokio::{sync::OnceCell, time::sleep};
 
 use crate::{CLIENT, DECK};
 
@@ -12,8 +12,10 @@ use crate::{CLIENT, DECK};
 
 const MAX_BACKOFF: u8 = 5;
 // UpdateNote, because it contains all information we need and can be converted to an AddNote with only defaultable values missing
-pub static NOTES: LazyLock<Vec<UpdateNote>> =
-    LazyLock::new(|| Handle::current().block_on(initialize_notes()));
+pub static NOTES: OnceCell<Vec<UpdateNote>> = OnceCell::const_new();
+pub async fn get_notes() -> &'static Vec<UpdateNote> {
+    NOTES.get_or_init(initialize_notes).await
+}
 
 #[derive(Serialize, Debug)]
 #[serde(rename_all = "camelCase")]
