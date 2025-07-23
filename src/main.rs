@@ -7,6 +7,7 @@
 
 use blake3::{Hash, Hasher};
 use log::trace;
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
@@ -14,38 +15,31 @@ use std::{
     fs::{self, File, OpenOptions},
     io::{self, BufWriter, Read},
     path::{Path, PathBuf},
-    sync::OnceLock,
+    sync::LazyLock,
 };
 
-use crate::{anki::initialize_notes, handle_md::handle_md};
+use crate::handle_md::handle_md;
 
 mod anki;
 mod handle_md;
 
-static DECK: OnceLock<String> = OnceLock::new();
+static DECK: LazyLock<String> = LazyLock::new(|| {
+    env::args()
+        .nth(1)
+        .expect("The deck name should be passed as the first argument")
+});
+static CLIENT: LazyLock<Client> = LazyLock::new(reqwest::Client::new);
 
 const IGNORE_PATHS: [&str; 1] = ["./Excalidraw"];
 
 #[tokio::main]
 async fn main() {
-    DECK.set(
-        env::args()
-            .nth(1)
-            .expect("The deck name should be passed as the first argument"),
-    )
-    .expect("DECK should'nt be initialized yet");
-
     env_logger::init();
-
-    let client = reqwest::Client::new();
-    initialize_notes(&client).await;
 
     let mut file_cache = FileCache::load();
     // let file = File::open(cache)
     // let file_cache = serde_json::from_reader(rdr)
-    traverse(PathBuf::from("."), &client, &mut file_cache)
-        .await
-        .unwrap();
+    traverse(PathBuf::from("."), &mut file_cache).await.unwrap();
     file_cache.save();
 }
 
@@ -115,11 +109,7 @@ fn hash_file(path: &Path) -> Hash {
     hasher.finalize()
 }
 
-async fn traverse(
-    dir: PathBuf,
-    client: &reqwest::Client,
-    file_cache: &mut FileCache,
-) -> io::Result<()> {
+async fn traverse(dir: PathBuf, file_cache: &mut FileCache) -> io::Result<()> {
     trace!("Recursing into dir {}", dir.display());
     for entry in dir.read_dir()?.flatten() {
         let path = entry.path();
@@ -129,29 +119,28 @@ async fn traverse(
                 .map(AsRef::<Path>::as_ref)
                 .contains(&path.as_path())
         {
-            Box::pin(traverse(path, client, file_cache)).await?;
+            Box::pin(traverse(path, file_cache)).await?;
         // markdown file
         } else if path.is_file()
             && let Some(extension) = path.extension()
             && extension == "md"
         {
-            let deck = DECK.get().expect("DECK should be initialized");
             let file_hash = hash_file(&path);
-            match file_cache.hashes.get_mut(deck) {
+            match file_cache.hashes.get_mut(&*DECK) {
                 // deck is in cache
                 Some(deck_cache) => {
                     // file isn't in cache or hashes don't match
                     if deck_cache.get(&path) != Some(&file_hash) {
-                        handle_md(&path, client).await;
+                        handle_md(&path).await;
                         deck_cache.insert(path, file_hash);
                     }
                 }
                 // deck is not in cache
                 None => {
-                    handle_md(&path, client).await;
+                    handle_md(&path).await;
                     file_cache
                         .hashes
-                        .insert(deck.clone(), HashMap::from([(path, file_hash)]));
+                        .insert(DECK.clone(), HashMap::from([(path, file_hash)]));
                 }
             }
         }

@@ -95,7 +95,7 @@ type LinkRename = (
     VecN<1, (IsNot<DisallowedInLinkRename>, char)>,
 );
 
-pub async fn handle_md(path: &Path, client: &reqwest::Client) {
+pub async fn handle_md(path: &Path) {
     /// the approximate length of a note id comment in bytes.
     /// Right for the years 2001-2286
     const APPROX_LEN_NOTE_ID_COMMENT: usize = "<!--NoteID:0000000000000-->\n".len();
@@ -136,8 +136,7 @@ pub async fn handle_md(path: &Path, client: &reqwest::Client) {
     let mut out_string =
         String::with_capacity(str.len() + clozes.len() * APPROX_LEN_NOTE_ID_COMMENT);
     for (contents, note_id, remaining_length) in clozes {
-        let notes = NOTES.get().expect("Notes should be initialized");
-        let actual_note_id = notes
+        let actual_note_id = NOTES
             .iter()
             .find(|note| {
                 note_id.is_some_and(|id| id == note.id.0) || note.fields["Text"] == contents
@@ -151,7 +150,6 @@ pub async fn handle_md(path: &Path, client: &reqwest::Client) {
                     contents,
                     note_id,
                     tags.iter().map(ToString::to_string).collect(),
-                    client,
                 )
                 .await;
                 if let Err(e) = result {
@@ -163,12 +161,7 @@ pub async fn handle_md(path: &Path, client: &reqwest::Client) {
             }
             // add new note
             None => {
-                match add_cloze_note(
-                    contents,
-                    tags.iter().map(ToString::to_string).collect(),
-                    client,
-                )
-                .await
+                match add_cloze_note(contents, tags.iter().map(ToString::to_string).collect()).await
                 {
                     Ok(note_id) => Some(note_id),
                     Err(e) => {

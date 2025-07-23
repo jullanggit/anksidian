@@ -1,9 +1,9 @@
 use log::{debug, warn};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
-use std::{collections::HashMap, fmt::Debug, sync::OnceLock, time::Duration};
-use tokio::time::sleep;
+use std::{collections::HashMap, fmt::Debug, sync::LazyLock, time::Duration};
+use tokio::{runtime::Handle, time::sleep};
 
-use crate::DECK;
+use crate::{CLIENT, DECK};
 
 // Handles interaction with AnkiConnect.
 // Could maybe use a bit more type-safety, stuff like action <-> params,
@@ -12,7 +12,8 @@ use crate::DECK;
 
 const MAX_BACKOFF: u8 = 5;
 // UpdateNote, because it contains all information we need and can be converted to an AddNote with only defaultable values missing
-pub static NOTES: OnceLock<Vec<UpdateNote>> = OnceLock::new();
+pub static NOTES: LazyLock<Vec<UpdateNote>> =
+    LazyLock::new(|| Handle::current().block_on(initialize_notes()));
 
 #[derive(Serialize, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -22,11 +23,8 @@ struct Request<P: Serialize + Debug> {
     params: P,
 }
 impl<P: Serialize + Debug> Request<P> {
-    async fn request<R: DeserializeOwned + Debug>(
-        &self,
-        client: &reqwest::Client,
-    ) -> Result<R, String> {
-        let request = client.post("http://localhost:8765").json(&self);
+    async fn request<R: DeserializeOwned + Debug>(&self) -> Result<R, String> {
+        let request = CLIENT.post("http://localhost:8765").json(&self);
         let mut i = 0;
         let response = loop {
             let timeout = Duration::from_millis(100 * 2_u64.pow(i.into()));
@@ -130,7 +128,7 @@ struct Response<T> {
 /// Contains a Unix Timestamp (so 13 decimal digits for the years 2001-2286)
 pub struct NoteId(pub u64);
 
-pub async fn initialize_notes(client: &reqwest::Client) {
+pub async fn initialize_notes() -> Vec<UpdateNote> {
     #[derive(Deserialize, Debug)]
     #[serde(rename_all = "camelCase")]
     struct Field {
@@ -154,41 +152,27 @@ pub async fn initialize_notes(client: &reqwest::Client) {
         action: Action::NotesInfo,
         version: 6,
         params: Query {
-            query: format!(
-                "\"deck:{}\"",
-                DECK.get().expect("DECK should be initialized")
-            ),
+            query: format!("\"deck:{}\"", &*DECK),
         },
     };
-    let result: Vec<NotesInfoNote> = request
-        .request(client)
-        .await
-        .expect("Request should'nt fail");
+    let result: Vec<NotesInfoNote> = request.request().await.expect("Request should'nt fail");
 
-    NOTES
-        .set(
-            result
-                .into_iter()
-                .filter(|note| note.model_name == "Cloze")
-                .map(|note| UpdateNote {
-                    id: note.note_id,
-                    fields: note.fields.into_iter().map(|(k, v)| (k, v.value)).collect(),
-                    tags: note.tags,
-                })
-                .collect(),
-        )
-        .expect("NOTES shouldn't be initialized yet");
+    result
+        .into_iter()
+        .filter(|note| note.model_name == "Cloze")
+        .map(|note| UpdateNote {
+            id: note.note_id,
+            fields: note.fields.into_iter().map(|(k, v)| (k, v.value)).collect(),
+            tags: note.tags,
+        })
+        .collect()
 }
 
-pub async fn add_cloze_note(
-    text: String,
-    tags: Vec<String>,
-    client: &reqwest::Client,
-) -> Result<NoteId, String> {
-    ensure_deck_exists(client).await?;
+pub async fn add_cloze_note(text: String, tags: Vec<String>) -> Result<NoteId, String> {
+    ensure_deck_exists().await?;
 
     let note = AddNote {
-        deck_name: DECK.get().expect("DECK should be initialized").clone(),
+        deck_name: DECK.clone(),
         model_name: "Cloze".to_string(),
         fields: HashMap::from([
             ("Text".to_string(), text.clone()),
@@ -206,15 +190,10 @@ pub async fn add_cloze_note(
         params: Note { note: &note },
     };
 
-    request.request(client).await
+    request.request().await
 }
 
-pub async fn update_cloze_note(
-    text: String,
-    id: NoteId,
-    tags: Vec<String>,
-    client: &reqwest::Client,
-) -> Result<(), String> {
+pub async fn update_cloze_note(text: String, id: NoteId, tags: Vec<String>) -> Result<(), String> {
     let note = UpdateNote {
         fields: HashMap::from([
             ("Text".to_string(), text),
@@ -229,7 +208,7 @@ pub async fn update_cloze_note(
         params: Note { note },
     };
 
-    match request.request(client).await {
+    match request.request().await {
         // return null, null on success
         Err(string) if &string == "Neither error nor result" => Ok(()),
         other => other,
@@ -237,14 +216,12 @@ pub async fn update_cloze_note(
 }
 
 /// Ensures that the deck `DECK` exists
-async fn ensure_deck_exists(client: &reqwest::Client) -> Result<(), String> {
+async fn ensure_deck_exists() -> Result<(), String> {
     let request = Request {
         // create deck won't overwrite
         action: Action::CreateDeck,
         version: 6,
-        params: CreateDeck {
-            deck: DECK.get().expect("DECK should be initialized").clone(),
-        },
+        params: CreateDeck { deck: DECK.clone() },
     };
-    request.request(client).await.map(|_: u64| {})
+    request.request().await.map(|_: u64| {})
 }
