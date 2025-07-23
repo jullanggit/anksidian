@@ -363,7 +363,7 @@ impl Math {
                 }
             })
         }
-        .map(|string| string.replace("}}", "} }")) // avoid confusing anki
+        .map(|string| string.replace("}", "} ")) // avoid confusing anki with }}
     }
 }
 
