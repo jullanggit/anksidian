@@ -21,10 +21,11 @@ type File = AllConsumed<Vec<FileElement>>;
 Or! {Newline, Cr = TStr<"\r">, Lf = TStr<"\n">, CrLF = TStr<"\r\n">}
 
 // heading
+Or! {Element, Code = Code, Math = Math, Link = Link, Char = char}
 type Heading = (
     VecN<1, TStr<"#">>,
     TStr<" ">,
-    Vec<(IsNot<Newline>, char)>,
+    Vec<(IsNot<Newline>, Element)>,
     Newline,
 );
 
@@ -33,7 +34,6 @@ type Tag = (TStr<"#">, VecN<1, (IsNot<DisallowedInTag>, char)>);
 Or! {DisallowedInTag, HashTag = TStr<"#">, Space = TStr<" ">, Newline = Newline}
 
 // Cloze
-Or! {Element, Code = Code, Math = Math, Link = Link, Char = char}
 type Cloze = (
     TStr<"==">,
     VecN<1, (IsNot<TStr<"==">>, Element)>,
@@ -121,7 +121,7 @@ pub async fn handle_md(path: &Path) {
             FileElement::ClozeLines(cloze_lines) => {
                 handle_cloze_lines(cloze_lines, &headings, &mut clozes, &path_str).await
             }
-            FileElement::Heading(heading) => handle_heading(heading, &mut headings),
+            FileElement::Heading(heading) => handle_heading(heading, &mut headings).await,
             FileElement::Tag(tag) => tags.push(
                 tag.0
                     .str()
@@ -208,9 +208,12 @@ pub async fn handle_md(path: &Path) {
     fs::write(path, out_string).expect("Writing to file shouldn't fail");
 }
 
-fn handle_heading(heading: Heading, headings: &mut Vec<String>) {
+async fn handle_heading(heading: Heading, headings: &mut Vec<String>) {
     let level = heading.0.0.len();
-    let contents = heading.2.into_iter().map(|char| char.1).collect::<String>();
+    let mut contents = String::new();
+    for (_, element) in heading.2 {
+        contents.push_str(&element.into_string().await);
+    }
 
     match level.cmp(&headings.len()) {
         Ordering::Less => {
@@ -254,6 +257,17 @@ impl Display for Code {
     }
 }
 
+impl Element {
+    async fn into_string(self) -> String {
+        match self {
+            Element::Code(code) => code.to_string(),
+            Element::Math(math) => math.convert().await.unwrap(), // TODO: handle errors
+            Element::Link(link) => link_to_string(link),
+            Element::Char(char) => char.to_string(),
+        }
+    }
+}
+
 async fn handle_cloze_lines(
     cloze_lines: ClozeLines,
     headings: &[String],
@@ -261,18 +275,9 @@ async fn handle_cloze_lines(
     clozes: &mut Vec<(String, Option<u64>, usize)>,
     path_str: &str,
 ) {
-    async fn handle_element(element: Element, string: &mut String) {
-        match element {
-            Element::Code(code) => string.push_str(&code.to_string()),
-            Element::Math(math) => string.push_str(&math.convert().await.unwrap()), // TODO: handle errors
-            Element::Link(link) => string.push_str(&link_to_string(link)),
-            Element::Char(char) => string.push(char),
-        }
-    }
-
     let mut string = String::new();
     for (_, element) in cloze_lines.0 {
-        handle_element(element, &mut string).await
+        string.push_str(&element.into_string().await);
     }
 
     let mut cloze_num: u8 = 0;
@@ -283,7 +288,7 @@ async fn handle_cloze_lines(
 
         write!(string, "{{{{c{cloze_num}::").unwrap();
         for (_, element) in cloze.1.0 {
-            handle_element(element, string).await
+            string.push_str(&element.into_string().await);
         }
         string.push_str("}}");
     }
@@ -292,7 +297,7 @@ async fn handle_cloze_lines(
     for element_or_cloze in cloze_lines.2 {
         match element_or_cloze {
             NotNewlineClozeOrElement::NotNewlineElement((_, element)) => {
-                handle_element(element, &mut string).await
+                string.push_str(&element.into_string().await);
             }
             NotNewlineClozeOrElement::Cloze(cloze) => {
                 add_cloze(cloze, &mut string, &mut cloze_num).await
