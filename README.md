@@ -30,6 +30,5 @@ Supported are:
 - parallel file handling (not really effective)
 - handle errors with thiserror
 - images
-- delete non-present notes
 
 ![](https://brainmade.org/black-logo.svg)

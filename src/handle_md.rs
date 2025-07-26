@@ -1,4 +1,4 @@
-use crate::anki::{add_cloze_note, get_notes, update_cloze_note};
+use crate::anki::{NOTES, add_cloze_note, update_cloze_note};
 use log::error;
 use std::{
     cmp::Ordering,
@@ -140,13 +140,17 @@ pub async fn handle_md(path: &Path) {
     let mut out_string =
         String::with_capacity(str.len() + clozes.len() * APPROX_LEN_NOTE_ID_COMMENT);
     for (contents, note_id, remaining_length) in clozes {
-        let actual_note_id = get_notes()
-            .await
-            .iter()
-            .find(|note| {
+        let actual_note_id = NOTES
+            .lock()
+            .unwrap()
+            .iter_mut()
+            .find(|(note, _)| {
                 note_id.is_some_and(|id| id == note.id.0) || note.fields["Text"] == contents
             })
-            .map(|note| note.id);
+            .map(|(note, seen)| {
+                *seen = true;
+                note.id
+            });
 
         let final_id = match actual_note_id {
             // update existing note

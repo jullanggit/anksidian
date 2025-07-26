@@ -18,7 +18,10 @@ use std::{
     sync::LazyLock,
 };
 
-use crate::handle_md::handle_md;
+use crate::{
+    anki::{handle_unseen_notes, initialize_notes},
+    handle_md::handle_md,
+};
 
 mod anki;
 mod handle_md;
@@ -36,11 +39,11 @@ const IGNORE_PATHS: [&str; 1] = ["./Excalidraw"];
 async fn main() {
     env_logger::init();
 
+    initialize_notes().await;
     let mut file_cache = FileCache::load();
-    // let file = File::open(cache)
-    // let file_cache = serde_json::from_reader(rdr)
     traverse(PathBuf::from("."), &mut file_cache).await.unwrap();
     file_cache.save();
+    handle_unseen_notes().await;
 }
 
 #[derive(Serialize, Deserialize, Default)]
