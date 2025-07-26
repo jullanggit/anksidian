@@ -4,6 +4,7 @@
 #![feature(iter_intersperse)]
 #![feature(iter_map_windows)]
 #![feature(file_buffered)]
+#![feature(associated_type_defaults)]
 
 use blake3::{Hash, Hasher};
 use log::trace;

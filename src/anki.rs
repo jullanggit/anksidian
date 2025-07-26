@@ -16,16 +16,23 @@ const MAX_BACKOFF: u8 = 5;
 /// (note, seen)
 pub static NOTES: Mutex<Vec<(UpdateNote, bool)>> = Mutex::new(Vec::new());
 
-#[derive(Serialize, Debug)]
-#[serde(rename_all = "camelCase")]
-struct Request<P: Serialize + Debug> {
-    action: Action,
-    version: u8, // i would like to use the nightly `= 6` here, but serde doesnt yet support this
-    params: P,
-}
-impl<P: Serialize + Debug> Request<P> {
-    async fn request<R: DeserializeOwned + Debug>(&self) -> Result<R, String> {
-        let request = CLIENT.post("http://localhost:8765").json(&self);
+trait Request: Debug + Serialize {
+    type Output: DeserializeOwned + Debug = ();
+    fn action_type() -> ActionType;
+    async fn request(&self) -> Result<Self::Output, String> {
+        #[derive(Serialize, Debug)]
+        #[serde(rename_all = "camelCase")]
+        struct Request<T> {
+            action: ActionType,
+            version: u8,
+            params: T,
+        }
+
+        let request = CLIENT.post("http://localhost:8765").json(&Request {
+            action: Self::action_type(),
+            version: 6,
+            params: self,
+        });
         let mut i = 0;
         let response = loop {
             let timeout = Duration::from_millis(100 * 2_u64.pow(i.into()));
@@ -46,7 +53,7 @@ impl<P: Serialize + Debug> Request<P> {
         };
 
         let response = if response.status().is_success() {
-            let response: Response<R> = response.json().await.unwrap();
+            let response: Response<Self::Output> = response.json().await.unwrap();
             match (response.result, response.error) {
                 (Some(result), None) => Ok(result),
                 (None, Some(error)) => Err(error),
@@ -63,7 +70,7 @@ impl<P: Serialize + Debug> Request<P> {
 
 #[derive(Serialize, Debug)]
 #[serde(rename_all = "camelCase")]
-enum Action {
+enum ActionType {
     AddNote,
     DeleteNotes,
     UpdateNote,
@@ -76,27 +83,11 @@ enum Action {
 struct Note<T> {
     note: T,
 }
-
-#[derive(Serialize, Debug)]
-#[serde(rename_all = "camelCase")]
-struct CreateDeck {
-    deck: String,
-}
-
-#[derive(Serialize, Debug)]
-#[serde(rename_all = "camelCase")]
-struct AddNote {
-    deck_name: String,
-    model_name: String,
-    fields: HashMap<String, String>,
-    options: Options,
-    tags: Vec<String>,
-}
-
-#[derive(Serialize, Debug)]
-#[serde(rename_all = "camelCase")]
-struct DeleteNotes {
-    notes: Vec<NoteId>,
+impl<T: Request> Request for Note<T> {
+    type Output = T::Output;
+    fn action_type() -> ActionType {
+        T::action_type()
+    }
 }
 
 #[derive(Serialize, Debug)]
@@ -106,23 +97,10 @@ pub struct UpdateNote {
     pub fields: HashMap<String, String>,
     tags: Vec<String>,
 }
-
-#[derive(Serialize, Debug)]
-#[serde(rename_all = "camelCase")]
-struct Options {
-    allow_duplicate: bool,
-    duplicate_scope: DuplicateScope,
-}
-
-#[derive(Serialize, Debug)]
-#[serde(rename_all = "camelCase")]
-enum DuplicateScope {
-    Deck,
-}
-
-#[derive(Serialize, Debug)]
-struct Query<Q: Serialize + Debug> {
-    query: Q,
+impl Request for UpdateNote {
+    fn action_type() -> ActionType {
+        ActionType::UpdateNote
+    }
 }
 
 #[derive(Deserialize, Debug)]
@@ -155,15 +133,21 @@ pub async fn initialize_notes() {
                                         // mod: u64,
                                         // cards: Vec<u64>,
     }
+    #[derive(Serialize, Debug)]
+    struct Query {
+        query: String,
+    }
+    impl Request for Query {
+        type Output = Vec<NotesInfoNote>;
+        fn action_type() -> ActionType {
+            ActionType::NotesInfo
+        }
+    }
 
-    let request = Request {
-        action: Action::NotesInfo,
-        version: 6,
-        params: Query {
-            query: format!("\"deck:{}\"", &*DECK),
-        },
+    let request = Query {
+        query: format!("\"deck:{}\"", &*DECK),
     };
-    let result: Vec<NotesInfoNote> = request.request().await.expect("Request should'nt fail");
+    let result = request.request().await.expect("Request should'nt fail");
 
     let notes = result
         .into_iter()
@@ -184,6 +168,17 @@ pub async fn initialize_notes() {
 
 #[expect(clippy::await_holding_lock)] // fine, because it's the last thing we do
 pub async fn handle_unseen_notes() {
+    #[derive(Serialize, Debug)]
+    #[serde(rename_all = "camelCase")]
+    struct DeleteNotes {
+        notes: Vec<NoteId>,
+    }
+    impl Request for DeleteNotes {
+        fn action_type() -> ActionType {
+            ActionType::DeleteNotes
+        }
+    }
+
     let mut buf = String::new();
     for (note, seen) in NOTES.lock().unwrap().iter() {
         if !seen {
@@ -195,14 +190,10 @@ pub async fn handle_unseen_notes() {
                 .expect("Reading from stdin shouldn't fail");
             let response = buf.trim();
             if response == "Y" || response == "y" {
-                let request = Request {
-                    action: Action::DeleteNotes,
-                    version: 6,
-                    params: DeleteNotes {
-                        notes: vec![note.id],
-                    },
+                let request = DeleteNotes {
+                    notes: vec![note.id],
                 };
-                match request.request::<()>().await {
+                match request.request().await {
                     // return null, null on success
                     Err(string) if &string == "Neither error nor result" => {}
                     Err(other) => panic!("{other:?}"),
@@ -215,9 +206,36 @@ pub async fn handle_unseen_notes() {
 }
 
 pub async fn add_cloze_note(text: String, tags: Vec<String>) -> Result<NoteId, String> {
+    #[derive(Serialize, Debug)]
+    #[serde(rename_all = "camelCase")]
+    enum DuplicateScope {
+        Deck,
+    }
+    #[derive(Serialize, Debug)]
+    #[serde(rename_all = "camelCase")]
+    struct Options {
+        allow_duplicate: bool,
+        duplicate_scope: DuplicateScope,
+    }
+    #[derive(Serialize, Debug)]
+    #[serde(rename_all = "camelCase")]
+    struct AddNote {
+        deck_name: String,
+        model_name: String,
+        fields: HashMap<String, String>,
+        options: Options,
+        tags: Vec<String>,
+    }
+    impl Request for AddNote {
+        type Output = NoteId;
+        fn action_type() -> ActionType {
+            ActionType::AddNote
+        }
+    }
+
     ensure_deck_exists().await?;
 
-    let note = AddNote {
+    let add_note = AddNote {
         deck_name: DECK.clone(),
         model_name: "Cloze".to_string(),
         fields: HashMap::from([
@@ -230,17 +248,13 @@ pub async fn add_cloze_note(text: String, tags: Vec<String>) -> Result<NoteId, S
         },
         tags: tags.clone(),
     };
-    let request = Request {
-        action: Action::AddNote,
-        version: 6,
-        params: Note { note: &note },
-    };
+    let request = Note { note: add_note };
 
     request.request().await
 }
 
 pub async fn update_cloze_note(text: String, id: NoteId, tags: Vec<String>) -> Result<(), String> {
-    let note = UpdateNote {
+    let update_note = UpdateNote {
         fields: HashMap::from([
             ("Text".to_string(), text),
             ("Back Extra".to_string(), String::new()),
@@ -248,11 +262,7 @@ pub async fn update_cloze_note(text: String, id: NoteId, tags: Vec<String>) -> R
         id,
         tags,
     };
-    let request = Request {
-        action: Action::UpdateNote,
-        version: 6,
-        params: Note { note },
-    };
+    let request = Note { note: update_note };
 
     match request.request().await {
         // return null, null on success
@@ -263,11 +273,18 @@ pub async fn update_cloze_note(text: String, id: NoteId, tags: Vec<String>) -> R
 
 /// Ensures that the deck `DECK` exists
 async fn ensure_deck_exists() -> Result<(), String> {
-    let request = Request {
-        // create deck won't overwrite
-        action: Action::CreateDeck,
-        version: 6,
-        params: CreateDeck { deck: DECK.clone() },
-    };
+    #[derive(Serialize, Debug)]
+    #[serde(rename_all = "camelCase")]
+    struct CreateDeck {
+        deck: String,
+    }
+    impl Request for CreateDeck {
+        type Output = u64;
+        fn action_type() -> ActionType {
+            ActionType::CreateDeck
+        }
+    }
+
+    let request = CreateDeck { deck: DECK.clone() };
     request.request().await.map(|_: u64| {})
 }
