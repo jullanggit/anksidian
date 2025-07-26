@@ -15,6 +15,7 @@ use std::{
     env,
     fs::{self, File, OpenOptions},
     io::{self, BufWriter, Read},
+    ops::Not,
     path::{Path, PathBuf},
     sync::LazyLock,
 };
@@ -28,9 +29,15 @@ mod anki;
 mod handle_md;
 
 static DECK: LazyLock<String> = LazyLock::new(|| {
-    env::args()
+    let deck_name = env::args()
         .nth(1)
-        .expect("The deck name should be passed as the first argument")
+        .expect("The deck name should be passed as the first argument");
+    assert_ne!(
+        &deck_name[0..2],
+        "--",
+        "Deck name shouldn't start with '--'"
+    );
+    deck_name
 });
 static CLIENT: LazyLock<Client> = LazyLock::new(reqwest::Client::new);
 
@@ -41,10 +48,18 @@ async fn main() {
     env_logger::init();
 
     initialize_notes().await;
-    let mut file_cache = FileCache::load();
+
+    let no_cache = env::args().skip(2).any(|arg| &arg == "--no-cache");
+    let mut file_cache = no_cache.not().then(FileCache::load);
+
     traverse(PathBuf::from("."), &mut file_cache).await.unwrap();
-    file_cache.save();
-    handle_unseen_notes().await;
+
+    if let Some(file_cache) = file_cache {
+        file_cache.save()
+    // only handle unseen notes if we dont use a cache, as we otherwise get false positives
+    } else {
+        handle_unseen_notes().await;
+    };
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -113,7 +128,7 @@ fn hash_file(path: &Path) -> Hash {
     hasher.finalize()
 }
 
-async fn traverse(dir: PathBuf, file_cache: &mut FileCache) -> io::Result<()> {
+async fn traverse(dir: PathBuf, file_cache: &mut Option<FileCache>) -> io::Result<()> {
     trace!("Recursing into dir {}", dir.display());
     for entry in dir.read_dir()?.flatten() {
         let path = entry.path();
@@ -129,22 +144,27 @@ async fn traverse(dir: PathBuf, file_cache: &mut FileCache) -> io::Result<()> {
             && let Some(extension) = path.extension()
             && extension == "md"
         {
-            let file_hash = hash_file(&path);
-            match file_cache.hashes.get_mut(&*DECK) {
-                // deck is in cache
-                Some(deck_cache) => {
-                    // file isn't in cache or hashes don't match
-                    if deck_cache.get(&path) != Some(&file_hash) {
-                        handle_md(&path).await;
-                        deck_cache.insert(path, file_hash);
+            match file_cache {
+                None => handle_md(&path).await,
+                Some(file_cache) => {
+                    let file_hash = hash_file(&path);
+                    match file_cache.hashes.get_mut(&*DECK) {
+                        // deck is in cache
+                        Some(deck_cache) => {
+                            // file isn't in cache or hashes don't match
+                            if deck_cache.get(&path) != Some(&file_hash) {
+                                handle_md(&path).await;
+                                deck_cache.insert(path, file_hash);
+                            }
+                        }
+                        // deck is not in cache
+                        None => {
+                            handle_md(&path).await;
+                            file_cache
+                                .hashes
+                                .insert(DECK.clone(), HashMap::from([(path, file_hash)]));
+                        }
                     }
-                }
-                // deck is not in cache
-                None => {
-                    handle_md(&path).await;
-                    file_cache
-                        .hashes
-                        .insert(DECK.clone(), HashMap::from([(path, file_hash)]));
                 }
             }
         }
