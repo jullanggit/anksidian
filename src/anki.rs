@@ -183,24 +183,32 @@ pub async fn handle_unseen_notes() {
     for (note, seen) in NOTES.lock().unwrap().iter() {
         if !seen {
             println!(
-                "Note present in Anki but not seen during run. Delete from Anki? (Y/n)\n{note:?}"
+                "Note present in Anki but not seen during run. Delete from Anki? (y/n)\n{note:?}"
             );
-            stdin()
-                .read_line(&mut buf)
-                .expect("Reading from stdin shouldn't fail");
-            let response = buf.trim();
-            if response == "Y" || response == "y" {
-                let request = DeleteNotes {
-                    notes: vec![note.id],
-                };
-                match request.request().await {
-                    // return null, null on success
-                    Err(string) if &string == "Neither error nor result" => {}
-                    Err(other) => panic!("{other:?}"),
-                    _ => {}
+            loop {
+                buf.clear();
+                stdin()
+                    .read_line(&mut buf)
+                    .expect("Reading from stdin shouldn't fail");
+                match buf.trim() {
+                    "Y" | "y" | "Yes" | "yes" => {
+                        let request = DeleteNotes {
+                            notes: vec![note.id],
+                        };
+                        match request.request().await {
+                            // return null, null on success
+                            Err(string) if &string == "Neither error nor result" => {}
+                            Err(other) => panic!("{other:?}"),
+                            _ => {}
+                        }
+                        break;
+                    }
+                    "N" | "n" | "No" | "no" => {
+                        break;
+                    }
+                    other => println!("unknown option '{other}"),
                 }
             }
-            buf.clear();
         }
     }
 }
