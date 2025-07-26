@@ -1,12 +1,13 @@
-use crate::anki::{NOTES, add_cloze_note, update_cloze_note};
+use crate::anki::{LockNotesError, NOTES, add_cloze_note, update_cloze_note};
 use log::error;
 use std::{
     cmp::Ordering,
     fmt::{Display, Write},
     fs, io,
-    path::Path,
+    path::{Path, PathBuf},
     process::Stdio,
 };
+use thiserror::Error;
 use tokio::{io::AsyncWriteExt, process::Command};
 use tparse::*;
 
@@ -95,14 +96,25 @@ type LinkRename = (
     VecN<1, (IsNot<DisallowedInLinkRename>, char)>,
 );
 
-pub async fn handle_md(path: &Path) {
+#[derive(Debug, Error)]
+pub enum HandleMdError {
+    #[error("Reading/writing file ({file}) failed: {error}")]
+    ReadWriteFile { file: PathBuf, error: io::Error },
+    #[error("Failed to lock NOTES: {0}")]
+    Lock(#[from] LockNotesError),
+}
+pub async fn handle_md(path: &Path) -> Result<(), HandleMdError> {
     /// the approximate length of a note id comment in bytes.
     /// Right for the years 2001-2286
     const APPROX_LEN_NOTE_ID_COMMENT: usize = "<!--NoteID:0000000000000-->\n".len();
 
-    let str = fs::read_to_string(path).expect("Reading file shouldnt fail");
+    let str = fs::read_to_string(path).map_err(|error| HandleMdError::ReadWriteFile {
+        file: path.to_path_buf(),
+        error,
+    })?;
 
-    let parsed = File::tparse(&str).expect("Parsing file shouldn't fail");
+    let parsed = File::tparse(&str)
+        .expect("Parsing file can't fail, as it includes a Vec<char> option, that always matches");
 
     let mut path_str = path
         .iter()
@@ -141,8 +153,7 @@ pub async fn handle_md(path: &Path) {
         String::with_capacity(str.len() + clozes.len() * APPROX_LEN_NOTE_ID_COMMENT);
     for (contents, note_id, remaining_length) in clozes {
         let actual_note_id = NOTES
-            .lock()
-            .unwrap()
+            .lock()?
             .iter_mut()
             .find(|(note, _)| {
                 note_id.is_some_and(|id| id == note.id.0) || note.fields["Text"] == contents
@@ -209,7 +220,10 @@ pub async fn handle_md(path: &Path) {
         }
     }
     out_string.push_str(&str[last_read..]);
-    fs::write(path, out_string).expect("Writing to file shouldn't fail");
+    fs::write(path, out_string).map_err(|error| HandleMdError::ReadWriteFile {
+        file: path.to_path_buf(),
+        error,
+    })
 }
 
 async fn handle_heading(heading: Heading, headings: &mut Vec<String>) {
