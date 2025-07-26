@@ -23,6 +23,14 @@ Supported are:
   - All tags in a file get added as Anki tags for all clozes in the file
   - Tags have to be at the start of separate lines
 
+## Arguments
+`anksidian DECK [--no-cache]`
+`DECK`:
+  - the deck to operate on
+`--no-cache`:
+  - do not use the file cache (located at `~/.cache/anksidian/file_cache.json`)
+  - ask for deletion of unseen notes
+
 ## Example
 - can be found in `test.md`
 
