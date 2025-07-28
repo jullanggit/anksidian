@@ -5,7 +5,8 @@ use std::{
     fmt::{Display, Write},
     fs, io,
     path::{Path, PathBuf},
-    process::Stdio,
+    process::{ExitStatusError, Stdio},
+    string::FromUtf8Error,
 };
 use thiserror::Error;
 use tokio::{io::AsyncWriteExt, process::Command};
@@ -102,6 +103,8 @@ pub enum HandleMdError {
     ReadWriteFile { file: PathBuf, error: io::Error },
     #[error("Failed to lock NOTES: {0}")]
     Lock(#[from] LockNotesError),
+    #[error("Failed to convert math: {0}")]
+    MathConvert(#[from] MathConvertError),
 }
 pub async fn handle_md(path: &Path) -> Result<(), HandleMdError> {
     /// the approximate length of a note id comment in bytes.
@@ -131,9 +134,9 @@ pub async fn handle_md(path: &Path) -> Result<(), HandleMdError> {
     for file_element in parsed.0.0 {
         match file_element {
             FileElement::ClozeLines(cloze_lines) => {
-                handle_cloze_lines(cloze_lines, &headings, &mut clozes, &path_str).await
+                handle_cloze_lines(cloze_lines, &headings, &mut clozes, &path_str).await?
             }
-            FileElement::Heading(heading) => handle_heading(heading, &mut headings).await,
+            FileElement::Heading(heading) => handle_heading(heading, &mut headings).await?,
             FileElement::Tag(tag) => tags.push(
                 tag.0
                     .str()
@@ -226,11 +229,14 @@ pub async fn handle_md(path: &Path) -> Result<(), HandleMdError> {
     })
 }
 
-async fn handle_heading(heading: Heading, headings: &mut Vec<String>) {
+async fn handle_heading(
+    heading: Heading,
+    headings: &mut Vec<String>,
+) -> Result<(), MathConvertError> {
     let level = heading.0.0.len();
     let mut contents = String::new();
     for (_, element) in heading.2 {
-        contents.push_str(&element.into_string().await);
+        contents.push_str(&element.into_string().await?);
     }
 
     match level.cmp(&headings.len()) {
@@ -248,6 +254,7 @@ async fn handle_heading(heading: Heading, headings: &mut Vec<String>) {
             headings.push(contents);
         }
     }
+    Ok(())
 }
 
 impl Display for Code {
@@ -276,13 +283,13 @@ impl Display for Code {
 }
 
 impl Element {
-    async fn into_string(self) -> String {
-        match self {
+    async fn into_string(self) -> Result<String, MathConvertError> {
+        Ok(match self {
             Element::Code(code) => code.to_string(),
-            Element::Math(math) => math.convert().await.unwrap(), // TODO: handle errors
+            Element::Math(math) => math.convert().await?,
             Element::Link(link) => link_to_string(link),
             Element::Char(char) => char.to_string(),
-        }
+        })
     }
 }
 
@@ -292,33 +299,38 @@ async fn handle_cloze_lines(
     // (contents, id, remaining_length)
     clozes: &mut Vec<(String, Option<u64>, usize)>,
     path_str: &str,
-) {
+) -> Result<(), MathConvertError> {
     let mut string = String::new();
     for (_, element) in cloze_lines.0 {
-        string.push_str(&element.into_string().await);
+        string.push_str(&element.into_string().await?);
     }
 
     let mut cloze_num: u8 = 0;
     let mut note_id = None;
 
-    async fn add_cloze(cloze: Cloze, string: &mut String, cloze_num: &mut u8) {
+    async fn add_cloze(
+        cloze: Cloze,
+        string: &mut String,
+        cloze_num: &mut u8,
+    ) -> Result<(), MathConvertError> {
         *cloze_num += 1;
 
-        write!(string, "{{{{c{cloze_num}::").unwrap();
+        write!(string, "{{{{c{cloze_num}::").expect("Writing to string shouldn't fail");
         for (_, element) in cloze.1.0 {
-            string.push_str(&element.into_string().await);
+            string.push_str(&element.into_string().await?);
         }
         string.push_str("}}");
+        Ok(())
     }
-    add_cloze(cloze_lines.1, &mut string, &mut cloze_num).await;
+    add_cloze(cloze_lines.1, &mut string, &mut cloze_num).await?;
 
     for element_or_cloze in cloze_lines.2 {
         match element_or_cloze {
             NotNewlineClozeOrElement::NotNewlineElement((_, element)) => {
-                string.push_str(&element.into_string().await);
+                string.push_str(&element.into_string().await?);
             }
             NotNewlineClozeOrElement::Cloze(cloze) => {
-                add_cloze(cloze, &mut string, &mut cloze_num).await
+                add_cloze(cloze, &mut string, &mut cloze_num).await?
             }
         }
     }
@@ -338,13 +350,14 @@ async fn handle_cloze_lines(
     string.push_str(path_str);
     for heading in headings {
         if !heading.is_empty() {
-            write!(string, " > {heading}").unwrap();
+            write!(string, " > {heading}").expect("Writing to string shouldn't fail");
         }
     }
 
     let remaining_length = cloze_lines.4.0;
 
     clozes.push((string, note_id, remaining_length));
+    Ok(())
 }
 
 fn link_to_string(link: Link) -> String {
@@ -358,9 +371,16 @@ fn link_to_string(link: Link) -> String {
     }
 }
 
+#[derive(Error, Debug)]
+pub enum MathConvertError {
+    #[error("Checking if math is typst failed: {0}")]
+    IsTypst(#[from] IsTypstError),
+    #[error("Converting typst to latex failed: {0}")]
+    TypstToLatex(#[from] TypstToLatexError),
+}
 impl Math {
     /// Convert from Obsidian latex/typst to anki latex
-    async fn convert(&self) -> io::Result<String> {
+    async fn convert(&self) -> Result<String, MathConvertError> {
         // extract inner math
         fn extract<T, U, V>(math: &(T, VecN<1, (U, char)>, V)) -> String {
             math.1.0.iter().map(|char| char.1).collect()
@@ -374,30 +394,40 @@ impl Math {
             Self::Display(_) => format!("$ {inner} $"),
         };
 
-        if is_typst(&typst_style_math).await? {
-            typst_to_latex(&typst_style_math).await
+        Ok(if is_typst(&typst_style_math).await? {
+            typst_to_latex(&typst_style_math).await?
         } else {
-            Ok(match self {
+            match self {
                 Self::Inline(_) => {
                     format!("\\({inner}\\)")
                 }
                 Self::Display(_) => {
                     format!("\\[{inner}\\]")
                 }
-            })
+            }
         }
-        .map(|string| string.replace("}", "} ")) // avoid confusing anki with }}
+        .replace("}", "} ")) // avoid confusing anki with }}
     }
 }
 
-async fn is_typst(math: &str) -> io::Result<bool> {
+#[derive(Error, Debug)]
+pub enum IsTypstError {
+    #[error("Failed to spawn typst process: {0}")]
+    Spawn(tokio::io::Error),
+    #[error("Failed to write to typst process stdin: {0}")]
+    StdinWrite(tokio::io::Error),
+    #[error("Failed to wait for typst process: {0}")]
+    Wait(tokio::io::Error),
+}
+async fn is_typst(math: &str) -> Result<bool, IsTypstError> {
     // spawn typst compiler
     let mut child = Command::new("typst")
         .args(["c", "-", "-f", "pdf", "/dev/null"])
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
-        .spawn()?;
+        .spawn()
+        .map_err(IsTypstError::Spawn)?;
 
     // write math to stdin
     child
@@ -405,35 +435,51 @@ async fn is_typst(math: &str) -> io::Result<bool> {
         .take()
         .expect("stdin is piped")
         .write_all(math.as_bytes())
-        .await?;
+        .await
+        .map_err(IsTypstError::StdinWrite)?;
 
     // success -> true
-    Ok(child.wait().await?.code() == Some(0))
+    Ok(child.wait().await.map_err(IsTypstError::Wait)?.success())
 }
 
-async fn typst_to_latex(typst: &str) -> io::Result<String> {
+#[derive(Error, Debug)]
+pub enum TypstToLatexError {
+    #[error("Failed to spawn pandoc process: {0}")]
+    Spawn(tokio::io::Error),
+    #[error("Failed to write to pandoc process stdin: {0}")]
+    StdinWrite(tokio::io::Error),
+    #[error("Failed to wait for pandoc process: {0}")]
+    Wait(tokio::io::Error),
+    #[error("Pandoc failed: {0}")]
+    ErrExit(#[from] ExitStatusError),
+    #[error("Pandoc output not utf8: {0}")]
+    Utf8(#[from] FromUtf8Error),
+}
+async fn typst_to_latex(typst: &str) -> Result<String, TypstToLatexError> {
     let mut child = Command::new("pandoc")
         .args(["-f", "typst", "-t", "latex"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .spawn()?;
+        .spawn()
+        .map_err(TypstToLatexError::Spawn)?;
 
     child
         .stdin
         .take()
         .expect("stdin is piped")
         .write_all(typst.as_bytes())
-        .await?;
+        .await
+        .map_err(TypstToLatexError::StdinWrite)?;
 
     let mut stdout = child
         .wait_with_output()
-        .await?
-        .exit_ok()
-        .map_err(io::Error::other)?
+        .await
+        .map_err(TypstToLatexError::Wait)?
+        .exit_ok()?
         .stdout;
     // remove trailing newline
     stdout.truncate(stdout.len() - 1);
 
-    String::from_utf8(stdout).map_err(io::Error::other)
+    String::from_utf8(stdout).map_err(TypstToLatexError::Utf8)
 }

@@ -27,4 +27,3 @@ thiserror = "2.0.12"
 
 [lints.clippy]
 unwrap_used = "warn"
-expect_used = "warn" # TODO: remove after completing transition to thiserror

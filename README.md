@@ -36,7 +36,6 @@ Supported are:
 
 ## TODO
 - parallel file handling (not really effective)
-- handle errors with thiserror
 - images
 
 ![](https://brainmade.org/black-logo.svg)
