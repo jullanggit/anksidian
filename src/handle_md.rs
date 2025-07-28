@@ -2,14 +2,15 @@ use crate::anki::{LockNotesError, NOTES, add_cloze_note, update_cloze_note};
 use log::error;
 use std::{
     cmp::Ordering,
-    fmt::{Display, Write},
-    fs, io,
+    fmt::{Display, Write as _},
+    fs,
+    io::{self, Write as _},
     path::{Path, PathBuf},
-    process::{ExitStatusError, Stdio},
+    process::{Command, ExitStatusError, Stdio},
     string::FromUtf8Error,
 };
 use thiserror::Error;
-use tokio::{io::AsyncWriteExt, process::Command};
+
 use tparse::*;
 
 // grammar
@@ -106,7 +107,7 @@ pub enum HandleMdError {
     #[error("Failed to convert math: {0}")]
     MathConvert(#[from] MathConvertError),
 }
-pub async fn handle_md(path: &Path) -> Result<(), HandleMdError> {
+pub fn handle_md(path: &Path) -> Result<(), HandleMdError> {
     /// the approximate length of a note id comment in bytes.
     /// Right for the years 2001-2286
     const APPROX_LEN_NOTE_ID_COMMENT: usize = "<!--NoteID:0000000000000-->\n".len();
@@ -134,9 +135,9 @@ pub async fn handle_md(path: &Path) -> Result<(), HandleMdError> {
     for file_element in parsed.0.0 {
         match file_element {
             FileElement::ClozeLines(cloze_lines) => {
-                handle_cloze_lines(cloze_lines, &headings, &mut clozes, &path_str).await?
+                handle_cloze_lines(cloze_lines, &headings, &mut clozes, &path_str)?
             }
-            FileElement::Heading(heading) => handle_heading(heading, &mut headings).await?,
+            FileElement::Heading(heading) => handle_heading(heading, &mut headings)?,
             FileElement::Tag(tag) => tags.push(
                 tag.0
                     .str()
@@ -173,8 +174,7 @@ pub async fn handle_md(path: &Path) -> Result<(), HandleMdError> {
                     contents,
                     note_id,
                     tags.iter().map(ToString::to_string).collect(),
-                )
-                .await;
+                );
                 if let Err(e) = result {
                     error!("{e}");
                     None
@@ -184,8 +184,7 @@ pub async fn handle_md(path: &Path) -> Result<(), HandleMdError> {
             }
             // add new note
             None => {
-                match add_cloze_note(contents, tags.iter().map(ToString::to_string).collect()).await
-                {
+                match add_cloze_note(contents, tags.iter().map(ToString::to_string).collect()) {
                     Ok(note_id) => Some(note_id),
                     Err(e) => {
                         error!("{e}");
@@ -229,14 +228,11 @@ pub async fn handle_md(path: &Path) -> Result<(), HandleMdError> {
     })
 }
 
-async fn handle_heading(
-    heading: Heading,
-    headings: &mut Vec<String>,
-) -> Result<(), MathConvertError> {
+fn handle_heading(heading: Heading, headings: &mut Vec<String>) -> Result<(), MathConvertError> {
     let level = heading.0.0.len();
     let mut contents = String::new();
     for (_, element) in heading.2 {
-        contents.push_str(&element.into_string().await?);
+        contents.push_str(&element.into_string()?);
     }
 
     match level.cmp(&headings.len()) {
@@ -283,17 +279,17 @@ impl Display for Code {
 }
 
 impl Element {
-    async fn into_string(self) -> Result<String, MathConvertError> {
+    fn into_string(self) -> Result<String, MathConvertError> {
         Ok(match self {
             Element::Code(code) => code.to_string(),
-            Element::Math(math) => math.convert().await?,
+            Element::Math(math) => math.convert()?,
             Element::Link(link) => link_to_string(link),
             Element::Char(char) => char.to_string(),
         })
     }
 }
 
-async fn handle_cloze_lines(
+fn handle_cloze_lines(
     cloze_lines: ClozeLines,
     headings: &[String],
     // (contents, id, remaining_length)
@@ -302,13 +298,13 @@ async fn handle_cloze_lines(
 ) -> Result<(), MathConvertError> {
     let mut string = String::new();
     for (_, element) in cloze_lines.0 {
-        string.push_str(&element.into_string().await?);
+        string.push_str(&element.into_string()?);
     }
 
     let mut cloze_num: u8 = 0;
     let mut note_id = None;
 
-    async fn add_cloze(
+    fn add_cloze(
         cloze: Cloze,
         string: &mut String,
         cloze_num: &mut u8,
@@ -317,20 +313,20 @@ async fn handle_cloze_lines(
 
         write!(string, "{{{{c{cloze_num}::").expect("Writing to string shouldn't fail");
         for (_, element) in cloze.1.0 {
-            string.push_str(&element.into_string().await?);
+            string.push_str(&element.into_string()?);
         }
         string.push_str("}}");
         Ok(())
     }
-    add_cloze(cloze_lines.1, &mut string, &mut cloze_num).await?;
+    add_cloze(cloze_lines.1, &mut string, &mut cloze_num)?;
 
     for element_or_cloze in cloze_lines.2 {
         match element_or_cloze {
             NotNewlineClozeOrElement::NotNewlineElement((_, element)) => {
-                string.push_str(&element.into_string().await?);
+                string.push_str(&element.into_string()?);
             }
             NotNewlineClozeOrElement::Cloze(cloze) => {
-                add_cloze(cloze, &mut string, &mut cloze_num).await?
+                add_cloze(cloze, &mut string, &mut cloze_num)?
             }
         }
     }
@@ -380,7 +376,7 @@ pub enum MathConvertError {
 }
 impl Math {
     /// Convert from Obsidian latex/typst to anki latex
-    async fn convert(&self) -> Result<String, MathConvertError> {
+    fn convert(&self) -> Result<String, MathConvertError> {
         // extract inner math
         fn extract<T, U, V>(math: &(T, VecN<1, (U, char)>, V)) -> String {
             math.1.0.iter().map(|char| char.1).collect()
@@ -394,8 +390,8 @@ impl Math {
             Self::Display(_) => format!("$ {inner} $"),
         };
 
-        Ok(if is_typst(&typst_style_math).await? {
-            typst_to_latex(&typst_style_math).await?
+        Ok(if is_typst(&typst_style_math)? {
+            typst_to_latex(&typst_style_math)?
         } else {
             match self {
                 Self::Inline(_) => {
@@ -413,13 +409,13 @@ impl Math {
 #[derive(Error, Debug)]
 pub enum IsTypstError {
     #[error("Failed to spawn typst process: {0}")]
-    Spawn(tokio::io::Error),
+    Spawn(std::io::Error),
     #[error("Failed to write to typst process stdin: {0}")]
-    StdinWrite(tokio::io::Error),
+    StdinWrite(std::io::Error),
     #[error("Failed to wait for typst process: {0}")]
-    Wait(tokio::io::Error),
+    Wait(std::io::Error),
 }
-async fn is_typst(math: &str) -> Result<bool, IsTypstError> {
+fn is_typst(math: &str) -> Result<bool, IsTypstError> {
     // spawn typst compiler
     let mut child = Command::new("typst")
         .args(["c", "-", "-f", "pdf", "/dev/null"])
@@ -435,27 +431,26 @@ async fn is_typst(math: &str) -> Result<bool, IsTypstError> {
         .take()
         .expect("stdin is piped")
         .write_all(math.as_bytes())
-        .await
         .map_err(IsTypstError::StdinWrite)?;
 
     // success -> true
-    Ok(child.wait().await.map_err(IsTypstError::Wait)?.success())
+    Ok(child.wait().map_err(IsTypstError::Wait)?.success())
 }
 
 #[derive(Error, Debug)]
 pub enum TypstToLatexError {
     #[error("Failed to spawn pandoc process: {0}")]
-    Spawn(tokio::io::Error),
+    Spawn(std::io::Error),
     #[error("Failed to write to pandoc process stdin: {0}")]
-    StdinWrite(tokio::io::Error),
+    StdinWrite(std::io::Error),
     #[error("Failed to wait for pandoc process: {0}")]
-    Wait(tokio::io::Error),
+    Wait(std::io::Error),
     #[error("Pandoc failed: {0}")]
     ErrExit(#[from] ExitStatusError),
     #[error("Pandoc output not utf8: {0}")]
     Utf8(#[from] FromUtf8Error),
 }
-async fn typst_to_latex(typst: &str) -> Result<String, TypstToLatexError> {
+fn typst_to_latex(typst: &str) -> Result<String, TypstToLatexError> {
     let mut child = Command::new("pandoc")
         .args(["-f", "typst", "-t", "latex"])
         .stdin(Stdio::piped())
@@ -469,12 +464,10 @@ async fn typst_to_latex(typst: &str) -> Result<String, TypstToLatexError> {
         .take()
         .expect("stdin is piped")
         .write_all(typst.as_bytes())
-        .await
         .map_err(TypstToLatexError::StdinWrite)?;
 
     let mut stdout = child
         .wait_with_output()
-        .await
         .map_err(TypstToLatexError::Wait)?
         .exit_ok()?
         .stdout;

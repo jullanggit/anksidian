@@ -1,17 +1,17 @@
 use log::{debug, warn};
-use reqwest::StatusCode;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{
     collections::HashMap,
     fmt::Debug,
     io::stdin,
     sync::{Mutex, MutexGuard, PoisonError},
+    thread::sleep,
     time::Duration,
 };
 use thiserror::Error;
-use tokio::time::sleep;
+use ureq::http::StatusCode;
 
-use crate::{CLIENT, DECK};
+use crate::{AGENT, DECK};
 
 // Handles interaction with AnkiConnect.
 // Could maybe use a bit more type-safety, stuff like action <-> params,
@@ -27,9 +27,9 @@ pub static NOTES: Mutex<Vec<(UpdateNote, bool)>> = Mutex::new(Vec::new());
 #[derive(Error, Debug)]
 pub enum RequestError {
     #[error("AnkiConnect request failed: {0}")]
-    AnkiConncectRequest(reqwest::Error),
+    AnkiConncectRequest(ureq::Error),
     #[error("Failed to deserialize response: {0}")]
-    Deserialisation(#[from] reqwest::Error),
+    Deserialisation(#[from] ureq::Error),
     #[error("AnkiConnect returned error: {0}")]
     AnkiConnectError(String),
     // We would like to also include the value of the result here, but it would also need to implement Debug + Display etc. (which for example () doesn't)
@@ -44,7 +44,7 @@ pub enum RequestError {
 trait Request: Debug + Serialize {
     type Output: DeserializeOwned + Debug = ();
     fn action_type() -> ActionType;
-    async fn request(&self) -> Result<Self::Output, RequestError> {
+    fn request(&self) -> Result<Self::Output, RequestError> {
         #[derive(Serialize, Debug)]
         #[serde(rename_all = "camelCase")]
         struct Request<T> {
@@ -53,24 +53,21 @@ trait Request: Debug + Serialize {
             params: T,
         }
 
-        let request = CLIENT.post("http://localhost:8765").json(&Request {
-            action: Self::action_type(),
-            version: 6,
-            params: self,
-        });
+        let request = || {
+            AGENT.post("http://localhost:8765").send_json(&Request {
+                action: Self::action_type(),
+                version: 6,
+                params: self,
+            })
+        };
         let mut i = 0;
         let response = loop {
             let timeout = Duration::from_millis(100 * 2_u64.pow(i.into()));
-            match request
-                .try_clone()
-                .expect("request body should be cloneable, as it isn't a stream")
-                .send()
-                .await
-            {
+            match request() {
                 Ok(response) => break response,
                 Err(e) if i < MAX_BACKOFF => {
                     warn!("AnkiConnect request failed (attempt {i}): {e}. Retrying in {timeout:?}");
-                    sleep(timeout).await;
+                    sleep(timeout);
                 }
                 Err(e) => Err(RequestError::AnkiConncectRequest(e))?,
             }
@@ -78,7 +75,7 @@ trait Request: Debug + Serialize {
         };
 
         let response = if response.status().is_success() {
-            let response: Response<Self::Output> = response.json().await?;
+            let response: Response<Self::Output> = response.into_body().read_json()?;
             match (response.result, response.error) {
                 (Some(result), None) => Ok(result),
                 (None, Some(error)) => Err(RequestError::AnkiConnectError(error)),
@@ -148,7 +145,7 @@ pub enum InitializeNotesError {
     #[error("Failed to lock NOTES: {0}")]
     Lock(#[from] LockNotesError),
 }
-pub async fn initialize_notes() -> Result<(), InitializeNotesError> {
+pub fn initialize_notes() -> Result<(), InitializeNotesError> {
     #[derive(Deserialize, Debug)]
     #[serde(rename_all = "camelCase")]
     struct Field {
@@ -181,7 +178,7 @@ pub async fn initialize_notes() -> Result<(), InitializeNotesError> {
     let request = Query {
         query: format!("\"deck:{}\"", &*DECK),
     };
-    let result = request.request().await?;
+    let result = request.request()?;
 
     let notes = result
         .into_iter()
@@ -211,8 +208,7 @@ pub enum UnseenNotesError {
     #[error("Failed to lock NOTES: {0}")]
     Lock(#[from] LockNotesError),
 }
-#[expect(clippy::await_holding_lock)] // fine, because it's the last thing we do
-pub async fn handle_unseen_notes() -> Result<(), UnseenNotesError> {
+pub fn handle_unseen_notes() -> Result<(), UnseenNotesError> {
     #[derive(Serialize, Debug)]
     #[serde(rename_all = "camelCase")]
     struct DeleteNotes {
@@ -238,7 +234,7 @@ pub async fn handle_unseen_notes() -> Result<(), UnseenNotesError> {
                         let request = DeleteNotes {
                             notes: vec![note.id],
                         };
-                        match request.request().await {
+                        match request.request() {
                             // return null, null on success
                             Err(RequestError::ErrorNorResult) => {}
                             Err(other) => Err(other)?,
@@ -257,7 +253,7 @@ pub async fn handle_unseen_notes() -> Result<(), UnseenNotesError> {
     Ok(())
 }
 
-pub async fn add_cloze_note(text: String, tags: Vec<String>) -> Result<NoteId, RequestError> {
+pub fn add_cloze_note(text: String, tags: Vec<String>) -> Result<NoteId, RequestError> {
     #[derive(Serialize, Debug)]
     #[serde(rename_all = "camelCase")]
     enum DuplicateScope {
@@ -285,7 +281,7 @@ pub async fn add_cloze_note(text: String, tags: Vec<String>) -> Result<NoteId, R
         }
     }
 
-    ensure_deck_exists().await?;
+    ensure_deck_exists()?;
 
     let add_note = AddNote {
         deck_name: DECK.clone(),
@@ -302,14 +298,10 @@ pub async fn add_cloze_note(text: String, tags: Vec<String>) -> Result<NoteId, R
     };
     let request = Note { note: add_note };
 
-    request.request().await
+    request.request()
 }
 
-pub async fn update_cloze_note(
-    text: String,
-    id: NoteId,
-    tags: Vec<String>,
-) -> Result<(), RequestError> {
+pub fn update_cloze_note(text: String, id: NoteId, tags: Vec<String>) -> Result<(), RequestError> {
     let update_note = UpdateNote {
         fields: HashMap::from([
             ("Text".to_string(), text),
@@ -320,7 +312,7 @@ pub async fn update_cloze_note(
     };
     let request = Note { note: update_note };
 
-    match request.request().await {
+    match request.request() {
         // return null, null on success
         Err(RequestError::ErrorNorResult) => Ok(()),
         other => other,
@@ -328,7 +320,7 @@ pub async fn update_cloze_note(
 }
 
 /// Ensures that the deck `DECK` exists
-async fn ensure_deck_exists() -> Result<(), RequestError> {
+fn ensure_deck_exists() -> Result<(), RequestError> {
     #[derive(Serialize, Debug)]
     #[serde(rename_all = "camelCase")]
     struct CreateDeck {
@@ -342,5 +334,5 @@ async fn ensure_deck_exists() -> Result<(), RequestError> {
     }
 
     let request = CreateDeck { deck: DECK.clone() };
-    request.request().await.map(|_: u64| {})
+    request.request().map(|_: u64| {})
 }

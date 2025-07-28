@@ -8,7 +8,6 @@
 
 use blake3::{Hash, Hasher};
 use log::trace;
-use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
@@ -20,6 +19,7 @@ use std::{
     sync::LazyLock,
 };
 use thiserror::Error;
+use ureq::Agent;
 
 use crate::{
     anki::{handle_unseen_notes, initialize_notes},
@@ -40,34 +40,27 @@ static DECK: LazyLock<String> = LazyLock::new(|| {
     );
     deck_name
 });
-static CLIENT: LazyLock<Client> = LazyLock::new(reqwest::Client::new);
+static AGENT: LazyLock<Agent> = LazyLock::new(Agent::new_with_defaults);
 
 const IGNORE_PATHS: [&str; 1] = ["./Excalidraw"];
 
-#[tokio::main]
-async fn main() {
+fn main() {
     env_logger::init();
 
-    initialize_notes()
-        .await
-        .expect("Failed to initialize notes");
+    initialize_notes().expect("Failed to initialize notes");
 
     let no_cache = env::args().skip(2).any(|arg| &arg == "--no-cache");
     let mut file_cache = no_cache
         .not()
         .then(|| FileCache::load().expect("Failed to load file cache"));
 
-    traverse(PathBuf::from("."), &mut file_cache)
-        .await
-        .expect("Failed to traverse");
+    traverse(PathBuf::from("."), &mut file_cache).expect("Failed to traverse");
 
     if let Some(file_cache) = file_cache {
         file_cache.save().expect("Failed to save file cache");
     // only handle unseen notes if we dont use a cache, as we otherwise get false positives
     } else {
-        handle_unseen_notes()
-            .await
-            .expect("Failed to handle unseen notes");
+        handle_unseen_notes().expect("Failed to handle unseen notes");
     };
 }
 
@@ -166,7 +159,7 @@ enum TraverseError {
         file: PathBuf,
     },
 }
-async fn traverse(dir: PathBuf, file_cache: &mut Option<FileCache>) -> Result<(), TraverseError> {
+fn traverse(dir: PathBuf, file_cache: &mut Option<FileCache>) -> Result<(), TraverseError> {
     trace!("Recursing into dir {}", dir.display());
     for entry in dir
         .read_dir()
@@ -180,22 +173,20 @@ async fn traverse(dir: PathBuf, file_cache: &mut Option<FileCache>) -> Result<()
                 .map(AsRef::<Path>::as_ref)
                 .contains(&path.as_path())
         {
-            Box::pin(traverse(path, file_cache)).await?;
+            traverse(path, file_cache)?;
         // markdown file
         } else if path.is_file()
             && let Some(extension) = path.extension()
             && extension == "md"
         {
-            let handle_and_wrap_md = async |path: &Path| {
-                handle_md(path)
-                    .await
-                    .map_err(|error| TraverseError::HandleMd {
-                        error,
-                        file: path.to_path_buf(),
-                    })
+            let handle_and_wrap_md = |path: &Path| {
+                handle_md(path).map_err(|error| TraverseError::HandleMd {
+                    error,
+                    file: path.to_path_buf(),
+                })
             };
             match file_cache {
-                None => handle_and_wrap_md(&path).await?,
+                None => handle_and_wrap_md(&path)?,
                 Some(file_cache) => {
                     let file_hash = hash_file(&path).map_err(|error| TraverseError::Hash {
                         error,
@@ -206,13 +197,13 @@ async fn traverse(dir: PathBuf, file_cache: &mut Option<FileCache>) -> Result<()
                         Some(deck_cache) => {
                             // file isn't in cache or hashes don't match
                             if deck_cache.get(&path) != Some(&file_hash) {
-                                handle_and_wrap_md(&path).await?;
+                                handle_and_wrap_md(&path)?;
                                 deck_cache.insert(path, file_hash);
                             }
                         }
                         // deck is not in cache
                         None => {
-                            handle_and_wrap_md(&path).await?;
+                            handle_and_wrap_md(&path)?;
                             file_cache
                                 .hashes
                                 .insert(DECK.clone(), HashMap::from([(path, file_hash)]));
