@@ -20,7 +20,8 @@ Supported are:
     - latex
 - Obsidian-style hyperlinks, including renamed hyperlinks ([[link|SomeRename]])
   - Images can also be included like this: `![[image.jpg]]`
-    - jpg, jpeg, jxl and png extensions are currently recognised. Please open a PR or issue if the format of your choice isn't yet included.
+  - jpg, jpeg, jxl, png, gif, bmp, svg, webp, apng, ico, tif, tiff and avif extensions are currently recognised. Please open a PR or issue if the format of your choice isn't yet included.
+  - Currently images are always shown on the backside of cards, although being able to choose this is planned.
 - tags (#tag)
   - All tags in a file get added as Anki tags for all clozes in the file
   - Tags have to be at the start of separate lines
@@ -38,6 +39,6 @@ Supported are:
 
 ## TODO
 - parallel file handling (not really effective)
-- images
+- choose where images are shown
 
 ![](https://brainmade.org/black-logo.svg)

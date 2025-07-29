@@ -385,7 +385,7 @@ impl Picture {
         Self {
             path,
             filename,
-            fields: String::from("Text"),
+            fields: String::from("Back Extra"), // TODO: maybe support both front and back
         }
     }
 }
