@@ -12,10 +12,12 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
     env::{self, VarError},
+    fmt::Display,
     fs::{self, File, OpenOptions},
     io::{BufWriter, Read},
     ops::Not,
     path::{Path, PathBuf},
+    process::exit,
     sync::LazyLock,
 };
 use thiserror::Error;
@@ -44,23 +46,37 @@ static AGENT: LazyLock<Agent> = LazyLock::new(Agent::new_with_defaults);
 
 const IGNORE_PATHS: [&str; 1] = ["./Excalidraw"];
 
+/// Unwraps the result, display-printing and exiting the program on errors.
+fn exit_on_err<T, E: Display>(res: Result<T, E>, msg: &str) -> T {
+    match res {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("{msg}: {e}");
+            exit(1);
+        }
+    }
+}
+
 fn main() {
     env_logger::init();
 
-    initialize_notes().expect("Failed to initialize notes");
+    exit_on_err(initialize_notes(), "Failed to initialize notes");
 
     let no_cache = env::args().skip(2).any(|arg| &arg == "--no-cache");
     let mut file_cache = no_cache
         .not()
-        .then(|| FileCache::load().expect("Failed to load file cache"));
+        .then(|| exit_on_err(FileCache::load(), "Failed to load file cache"));
 
-    traverse(PathBuf::from("."), &mut file_cache).expect("Failed to traverse");
+    exit_on_err(
+        traverse(PathBuf::from("."), &mut file_cache),
+        "Failed to traverse directory",
+    );
 
     if let Some(file_cache) = file_cache {
-        file_cache.save().expect("Failed to save file cache");
+        exit_on_err(file_cache.save(), "Failed to save file cache");
     // only handle unseen notes if we dont use a cache, as we otherwise get false positives
     } else {
-        handle_unseen_notes().expect("Failed to handle unseen notes");
+        exit_on_err(handle_unseen_notes(), "Failed to handle unseen notes");
     };
 }
 
