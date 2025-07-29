@@ -409,16 +409,14 @@ fn link_to_string(link: Link, pictures: &mut Vec<Picture>) -> String {
 
 /// Check if path is an image and if so handle it. Returns the string to be embedded into the cloze
 fn handle_maybe_image(path: &Path, pictures: &mut Vec<Picture>) -> Option<String> {
-    let filename = path.to_str()?.to_string();
     const IMAGE_EXTENSIONS: [&str; 13] = [
         "jpg", "jpeg", "jxl", "png", "gif", "bmp", "svg", "webp", "apng", "ico", "tif", "tiff",
         "avif",
     ];
     for extension in IMAGE_EXTENSIONS {
         if path.extension() == Some(OsStr::new(extension)) && path.exists() {
-            let to_embed = format!("<img src=\"{}\">", filename);
             // convert jxl to jpeg
-            let path = if extension == "jxl" {
+            let (path, filename) = if extension == "jxl" {
                 let mut out_path = temp_dir().join(path);
                 out_path.set_extension("jpg");
 
@@ -436,10 +434,13 @@ fn handle_maybe_image(path: &Path, pictures: &mut Vec<Picture>) -> Option<String
                     .exit_ok()
                     .ok()?;
 
-                out_path
+                let mut filename = path.to_path_buf();
+                filename.set_extension("jpg");
+                (out_path, filename.to_str()?.to_string())
             } else {
-                path.to_path_buf()
+                (path.to_path_buf(), path.to_str()?.to_string())
             };
+            let to_embed = format!("<img src=\"{}\">", filename);
             pictures.push(Picture::new(path, filename));
             return Some(to_embed);
         }
