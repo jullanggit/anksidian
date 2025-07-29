@@ -425,7 +425,7 @@ fn maybe_handle_image(path: &Path, pictures: &mut Vec<Picture>) -> Option<()> {
         if path.extension() == Some(OsStr::new(extension)) && path.exists() {
             // convert jxl to jpeg
             let (path, filename) = if extension == "jxl" {
-                let mut out_path = temp_dir().join(path).canonicalize().ok()?;
+                let mut out_path = temp_dir().join(path);
                 out_path.set_extension("jpg");
 
                 if let Some(parent) = out_path.parent() {
@@ -445,7 +445,10 @@ fn maybe_handle_image(path: &Path, pictures: &mut Vec<Picture>) -> Option<()> {
                 let mut filename = path.to_path_buf();
                 filename.set_extension("jpg");
 
-                (out_path, filename.to_str()?.to_string())
+                (
+                    out_path.canonicalize().ok()?,
+                    filename.to_str()?.to_string(),
+                )
             } else {
                 (path.canonicalize().ok()?, path.to_str()?.to_string())
             };
