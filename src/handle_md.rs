@@ -1,5 +1,6 @@
 use crate::anki::{LockNotesError, NOTES, add_cloze_note, update_cloze_note};
 use log::error;
+use serde::Serialize;
 use std::{
     cmp::Ordering,
     fmt::{Display, Write as _},
@@ -86,6 +87,7 @@ type DisplayMath = (TStr<"$$">, VecN<1, (IsNot<TStr<"$$">>, char)>, TStr<"$$">);
 type LinkRenameSeparator = TStr<"|">;
 Or! {DisallowedInLink, ClosingBrackets = TStr<"]]">, Newline = Newline, LinkRenameSeparator = LinkRenameSeparator}
 type Link = (
+    Option<TStr<"!">>, // display
     TStr<"[[">,
     VecN<1, (IsNot<DisallowedInLink>, char)>,
     Option<LinkRename>,
@@ -130,14 +132,19 @@ pub fn handle_md(path: &Path) -> Result<(), HandleMdError> {
 
     let mut tags = Vec::new();
     let mut headings = Vec::new();
+    let mut pictures = Vec::new();
     let mut clozes = Vec::new();
 
     for file_element in parsed.0.0 {
         match file_element {
-            FileElement::ClozeLines(cloze_lines) => {
-                handle_cloze_lines(cloze_lines, &headings, &mut clozes, &path_str)?
-            }
-            FileElement::Heading(heading) => handle_heading(heading, &mut headings)?,
+            FileElement::ClozeLines(cloze_lines) => handle_cloze_lines(
+                cloze_lines,
+                &headings,
+                &mut pictures,
+                &mut clozes,
+                &path_str,
+            )?,
+            FileElement::Heading(heading) => handle_heading(heading, &mut headings, &mut pictures)?,
             FileElement::Tag(tag) => tags.push(
                 tag.0
                     .str()
@@ -174,6 +181,7 @@ pub fn handle_md(path: &Path) -> Result<(), HandleMdError> {
                     contents,
                     note_id,
                     tags.iter().map(ToString::to_string).collect(),
+                    pictures.clone(),
                 );
                 if let Err(e) = result {
                     error!("{e}");
@@ -184,7 +192,11 @@ pub fn handle_md(path: &Path) -> Result<(), HandleMdError> {
             }
             // add new note
             None => {
-                match add_cloze_note(contents, tags.iter().map(ToString::to_string).collect()) {
+                match add_cloze_note(
+                    contents,
+                    tags.iter().map(ToString::to_string).collect(),
+                    pictures.clone(),
+                ) {
                     Ok(note_id) => Some(note_id),
                     Err(e) => {
                         error!("{e}");
@@ -228,11 +240,15 @@ pub fn handle_md(path: &Path) -> Result<(), HandleMdError> {
     })
 }
 
-fn handle_heading(heading: Heading, headings: &mut Vec<String>) -> Result<(), MathConvertError> {
+fn handle_heading(
+    heading: Heading,
+    headings: &mut Vec<String>,
+    pictures: &mut Vec<Picture>,
+) -> Result<(), MathConvertError> {
     let level = heading.0.0.len();
     let mut contents = String::new();
     for (_, element) in heading.2 {
-        contents.push_str(&element.into_string()?);
+        contents.push_str(&element.into_string(pictures)?);
     }
 
     match level.cmp(&headings.len()) {
@@ -279,11 +295,11 @@ impl Display for Code {
 }
 
 impl Element {
-    fn into_string(self) -> Result<String, MathConvertError> {
+    fn into_string(self, pictures: &mut Vec<Picture>) -> Result<String, MathConvertError> {
         Ok(match self {
             Element::Code(code) => code.to_string(),
             Element::Math(math) => math.convert()?,
-            Element::Link(link) => link_to_string(link),
+            Element::Link(link) => link_to_string(link, pictures),
             Element::Char(char) => char.to_string(),
         })
     }
@@ -292,13 +308,14 @@ impl Element {
 fn handle_cloze_lines(
     cloze_lines: ClozeLines,
     headings: &[String],
+    pictures: &mut Vec<Picture>,
     // (contents, id, remaining_length)
     clozes: &mut Vec<(String, Option<u64>, usize)>,
     path_str: &str,
 ) -> Result<(), MathConvertError> {
     let mut string = String::new();
     for (_, element) in cloze_lines.0 {
-        string.push_str(&element.into_string()?);
+        string.push_str(&element.into_string(pictures)?);
     }
 
     let mut cloze_num: u8 = 0;
@@ -308,25 +325,26 @@ fn handle_cloze_lines(
         cloze: Cloze,
         string: &mut String,
         cloze_num: &mut u8,
+        pictures: &mut Vec<Picture>,
     ) -> Result<(), MathConvertError> {
         *cloze_num += 1;
 
         write!(string, "{{{{c{cloze_num}::").expect("Writing to string shouldn't fail");
         for (_, element) in cloze.1.0 {
-            string.push_str(&element.into_string()?);
+            string.push_str(&element.into_string(pictures)?);
         }
         string.push_str("}}");
         Ok(())
     }
-    add_cloze(cloze_lines.1, &mut string, &mut cloze_num)?;
+    add_cloze(cloze_lines.1, &mut string, &mut cloze_num, pictures)?;
 
     for element_or_cloze in cloze_lines.2 {
         match element_or_cloze {
             NotNewlineClozeOrElement::NotNewlineElement((_, element)) => {
-                string.push_str(&element.into_string()?);
+                string.push_str(&element.into_string(pictures)?);
             }
             NotNewlineClozeOrElement::Cloze(cloze) => {
-                add_cloze(cloze, &mut string, &mut cloze_num)?
+                add_cloze(cloze, &mut string, &mut cloze_num, pictures)?
             }
         }
     }
@@ -356,15 +374,50 @@ fn handle_cloze_lines(
     Ok(())
 }
 
-fn link_to_string(link: Link) -> String {
+#[derive(Clone, Debug, Serialize)]
+pub struct Picture {
+    path: PathBuf,
+    filename: String,
+    fields: String,
+}
+impl Picture {
+    pub fn new(path: PathBuf, filename: String) -> Self {
+        Self {
+            path,
+            filename,
+            fields: String::from("Text"),
+        }
+    }
+}
+fn link_to_string(link: Link, pictures: &mut Vec<Picture>) -> String {
     fn to_string<T: TParse>(vec: VecN<1, (IsNot<T>, char)>) -> String {
         vec.0.into_iter().map(|char| char.1).collect::<String>()
     }
-    if let Some(rename) = link.2 {
+    let contents = if let Some(rename) = link.3 {
         to_string(rename.1)
     } else {
-        to_string(link.1)
+        to_string(link.2)
+    };
+    // handle images only if they are displayed
+    if link.0.is_some() {
+        const IMAGE_EXTENSIONS: [&str; 13] = [
+            "jpg", "jpeg", "jxl", "png", "gif", "bmp", "svg", "webp", "apng", "ico", "tif", "tiff",
+            "avif",
+        ];
+        for extension in IMAGE_EXTENSIONS {
+            if contents.ends_with(&format!(".{extension}")) {
+                // get absolute path, as it is required by anki
+                if let Ok(absolute_path) = Path::new(&contents).canonicalize()
+                    && absolute_path.exists()
+                {
+                    let string = format!("<img src=\"{contents}\">");
+                    pictures.push(Picture::new(absolute_path, contents));
+                    return string;
+                }
+            }
+        }
     }
+    contents
 }
 
 #[derive(Error, Debug)]

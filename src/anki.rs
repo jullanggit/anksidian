@@ -11,7 +11,7 @@ use std::{
 use thiserror::Error;
 use ureq::http::StatusCode;
 
-use crate::{AGENT, DECK};
+use crate::{AGENT, DECK, handle_md::Picture};
 
 // Handles interaction with AnkiConnect.
 // Could maybe use a bit more type-safety, stuff like action <-> params,
@@ -98,6 +98,7 @@ enum ActionType {
     UpdateNote,
     NotesInfo,
     CreateDeck,
+    StoreMediaFile,
 }
 
 #[derive(Serialize, Debug)]
@@ -253,7 +254,11 @@ pub fn handle_unseen_notes() -> Result<(), UnseenNotesError> {
     Ok(())
 }
 
-pub fn add_cloze_note(text: String, tags: Vec<String>) -> Result<NoteId, RequestError> {
+pub fn add_cloze_note(
+    text: String,
+    tags: Vec<String>,
+    pictures: Vec<Picture>,
+) -> Result<NoteId, RequestError> {
     #[derive(Serialize, Debug)]
     #[serde(rename_all = "camelCase")]
     enum DuplicateScope {
@@ -273,6 +278,7 @@ pub fn add_cloze_note(text: String, tags: Vec<String>) -> Result<NoteId, Request
         fields: HashMap<String, String>,
         options: Options,
         tags: Vec<String>,
+        picture: Vec<Picture>,
     }
     impl Request for AddNote {
         type Output = NoteId;
@@ -295,13 +301,30 @@ pub fn add_cloze_note(text: String, tags: Vec<String>) -> Result<NoteId, Request
             duplicate_scope: DuplicateScope::Deck,
         },
         tags: tags.clone(),
+        picture: pictures,
     };
     let request = Note { note: add_note };
 
     request.request()
 }
 
-pub fn update_cloze_note(text: String, id: NoteId, tags: Vec<String>) -> Result<(), RequestError> {
+impl Request for Picture {
+    type Output = String;
+    fn action_type() -> ActionType {
+        ActionType::StoreMediaFile
+    }
+}
+pub fn update_cloze_note(
+    text: String,
+    id: NoteId,
+    tags: Vec<String>,
+    pictures: Vec<Picture>,
+) -> Result<(), RequestError> {
+    // store pictures to anki
+    for picture in pictures {
+        picture.request()?;
+    }
+    // update note
     let update_note = UpdateNote {
         fields: HashMap::from([
             ("Text".to_string(), text),

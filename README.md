@@ -19,6 +19,8 @@ Supported are:
     - typst
     - latex
 - Obsidian-style hyperlinks, including renamed hyperlinks ([[link|SomeRename]])
+  - Images can also be included like this: `![[image.jpg]]`
+    - jpg, jpeg, jxl and png extensions are currently recognised. Please open a PR or issue if the format of your choice isn't yet included.
 - tags (#tag)
   - All tags in a file get added as Anki tags for all clozes in the file
   - Tags have to be at the start of separate lines

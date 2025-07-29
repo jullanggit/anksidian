@@ -1,7 +1,8 @@
 # Thermal expansion
 ## Definition
 - Change of ==[[volume|Volume]]/length== in response to ==change of
-[[temperature]]==
+[[temperature]]
+![[image.jxl]]==
 ## Formula
 ==$$Delta V/L = V/L dot gamma/alpha dot Delta T$$==
 ### Code
