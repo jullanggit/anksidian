@@ -401,14 +401,17 @@ fn link_to_string(link: Link, pictures: &mut Vec<Picture>) -> String {
         to_string(link.2)
     };
     // handle images only if they are displayed
-    if link.0.is_some() {
-        handle_maybe_image(Path::new(&contents), pictures);
+    if link.0.is_some() && maybe_handle_image(Path::new(&contents), pictures).is_some() {
+        // dont display anything on the front, back will be handled by the anki module
+        String::new()
+    } else {
+        contents
     }
-    contents
 }
 
 /// Check if path is an image and if so handle it. Returns the string to be embedded into the cloze
-fn handle_maybe_image(path: &Path, pictures: &mut Vec<Picture>) -> Option<String> {
+// Returns Option<()> to enable ?
+fn maybe_handle_image(path: &Path, pictures: &mut Vec<Picture>) -> Option<()> {
     const IMAGE_EXTENSIONS: [&str; 13] = [
         "jpg", "jpeg", "jxl", "png", "gif", "bmp", "svg", "webp", "apng", "ico", "tif", "tiff",
         "avif",
@@ -436,13 +439,13 @@ fn handle_maybe_image(path: &Path, pictures: &mut Vec<Picture>) -> Option<String
 
                 let mut filename = path.to_path_buf();
                 filename.set_extension("jpg");
+
                 (out_path, filename.to_str()?.to_string())
             } else {
                 (path.to_path_buf(), path.to_str()?.to_string())
             };
-            let to_embed = format!("<img src=\"{}\">", filename);
             pictures.push(Picture::new(path, filename));
-            return Some(to_embed);
+            return Some(());
         }
     }
     None

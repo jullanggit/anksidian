@@ -255,6 +255,14 @@ pub fn handle_unseen_notes() -> Result<(), UnseenNotesError> {
     Ok(())
 }
 
+/// Include pictures on the back
+fn back_extra(pictures: &[Picture]) -> String {
+    pictures
+        .iter()
+        .map(|picture| format!("<img src=\"{}\">", picture.filename))
+        .collect()
+}
+
 pub fn add_cloze_note(
     text: String,
     tags: Vec<String>,
@@ -295,7 +303,7 @@ pub fn add_cloze_note(
         model_name: "Cloze".to_string(),
         fields: HashMap::from([
             ("Text".to_string(), text.clone()),
-            ("Back Extra".to_string(), String::new()),
+            ("Back Extra".to_string(), back_extra(&pictures)),
         ]),
         options: Options {
             allow_duplicate: false,
@@ -326,6 +334,9 @@ pub fn update_cloze_note(
             ActionType::StoreMediaFile
         }
     }
+
+    let back_extra = back_extra(&pictures);
+
     // store pictures to anki
     for picture in pictures {
         StorePicture {
@@ -338,7 +349,7 @@ pub fn update_cloze_note(
     let update_note = UpdateNote {
         fields: HashMap::from([
             ("Text".to_string(), text),
-            ("Back Extra".to_string(), String::new()),
+            ("Back Extra".to_string(), back_extra),
         ]),
         id,
         tags,
