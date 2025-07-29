@@ -1,4 +1,4 @@
-use crate::anki::{LockNotesError, NOTES, add_cloze_note, update_cloze_note};
+use crate::anki::{LockNotesError, NOTES, NoteId, add_cloze_note, update_cloze_note};
 use log::error;
 use serde::Serialize;
 use std::{
@@ -102,6 +102,13 @@ type LinkRename = (
     VecN<1, (IsNot<DisallowedInLinkRename>, char)>,
 );
 
+pub struct ClozeData {
+    pub contents: String,
+    pub note_id: Option<NoteId>,
+    pub pictures: Vec<Picture>,
+    remaining_length: usize,
+}
+
 #[derive(Debug, Error)]
 pub enum HandleMdError {
     #[error("Reading/writing file ({file}) failed: {error}")]
@@ -134,19 +141,16 @@ pub fn handle_md(path: &Path) -> Result<(), HandleMdError> {
 
     let mut tags = Vec::new();
     let mut headings = Vec::new();
-    let mut pictures = Vec::new();
     let mut clozes = Vec::new();
 
     for file_element in parsed.0.0 {
         match file_element {
-            FileElement::ClozeLines(cloze_lines) => handle_cloze_lines(
-                cloze_lines,
-                &headings,
-                &mut pictures,
-                &mut clozes,
-                &path_str,
-            )?,
-            FileElement::Heading(heading) => handle_heading(heading, &mut headings, &mut pictures)?,
+            FileElement::ClozeLines(cloze_lines) => {
+                handle_cloze_lines(cloze_lines, &headings, &mut clozes, &path_str)?
+            }
+            FileElement::Heading(heading) => {
+                handle_heading(heading, &mut headings, &mut Vec::new())?
+            }
             FileElement::Tag(tag) => tags.push(
                 tag.0
                     .str()
@@ -164,27 +168,27 @@ pub fn handle_md(path: &Path) -> Result<(), HandleMdError> {
     let mut last_read = 0;
     let mut out_string =
         String::with_capacity(str.len() + clozes.len() * APPROX_LEN_NOTE_ID_COMMENT);
-    for (contents, note_id, remaining_length) in clozes {
+    for cloze in clozes {
         let actual_note_id = NOTES
             .lock()?
             .iter_mut()
             .find(|(note, _)| {
-                note_id.is_some_and(|id| id == note.id.0) || note.fields["Text"] == contents
+                cloze.note_id.is_some_and(|id| id == note.id)
+                    || note.fields["Text"] == cloze.contents
             })
             .map(|(note, seen)| {
                 *seen = true;
                 note.id
             });
 
+        let note_id = cloze.note_id;
+        let index = str.len() - cloze.remaining_length;
+
         let final_id = match actual_note_id {
             // update existing note
             Some(note_id) => {
-                let result = update_cloze_note(
-                    contents,
-                    note_id,
-                    tags.iter().map(ToString::to_string).collect(),
-                    pictures.clone(),
-                );
+                let result =
+                    update_cloze_note(cloze, tags.iter().map(ToString::to_string).collect());
                 if let Err(e) = result {
                     error!("{e}");
                     None
@@ -193,21 +197,15 @@ pub fn handle_md(path: &Path) -> Result<(), HandleMdError> {
                 }
             }
             // add new note
-            None => {
-                match add_cloze_note(
-                    contents,
-                    tags.iter().map(ToString::to_string).collect(),
-                    pictures.clone(),
-                ) {
-                    Ok(note_id) => Some(note_id),
-                    Err(e) => {
-                        error!("{e}");
-                        None
-                    }
+            None => match add_cloze_note(cloze, tags.iter().map(ToString::to_string).collect()) {
+                Ok(note_id) => Some(note_id),
+                Err(e) => {
+                    error!("{e}");
+                    None
                 }
-            }
+            },
         };
-        let index = str.len() - remaining_length;
+
         out_string.push_str(&str[last_read..index]);
         last_read = index;
         match (note_id, final_id) {
@@ -224,7 +222,7 @@ pub fn handle_md(path: &Path) -> Result<(), HandleMdError> {
             }
             // replace old id
             (Some(previous_id), Some(new_id)) => {
-                let previous_id_string = previous_id.to_string();
+                let previous_id_string = previous_id.0.to_string();
                 let start_previous_id = out_string
                     .rfind(&previous_id_string)
                     .expect("Previous ID should be present");
@@ -310,14 +308,13 @@ impl Element {
 fn handle_cloze_lines(
     cloze_lines: ClozeLines,
     headings: &[String],
-    pictures: &mut Vec<Picture>,
-    // (contents, id, remaining_length)
-    clozes: &mut Vec<(String, Option<u64>, usize)>,
+    clozes: &mut Vec<ClozeData>,
     path_str: &str,
 ) -> Result<(), MathConvertError> {
     let mut string = String::new();
+    let mut pictures = Vec::new();
     for (_, element) in cloze_lines.0 {
-        string.push_str(&element.into_string(pictures)?);
+        string.push_str(&element.into_string(&mut pictures)?);
     }
 
     let mut cloze_num: u8 = 0;
@@ -338,27 +335,30 @@ fn handle_cloze_lines(
         string.push_str("}}");
         Ok(())
     }
-    add_cloze(cloze_lines.1, &mut string, &mut cloze_num, pictures)?;
+    add_cloze(cloze_lines.1, &mut string, &mut cloze_num, &mut pictures)?;
 
     for element_or_cloze in cloze_lines.2 {
         match element_or_cloze {
             NotNewlineClozeOrElement::NotNewlineElement((_, element)) => {
-                string.push_str(&element.into_string(pictures)?);
+                string.push_str(&element.into_string(&mut pictures)?);
             }
             NotNewlineClozeOrElement::Cloze(cloze) => {
-                add_cloze(cloze, &mut string, &mut cloze_num, pictures)?
+                add_cloze(cloze, &mut string, &mut cloze_num, &mut pictures)?
             }
         }
     }
     if let Some(note_id_comment) = cloze_lines.3 {
-        note_id = Some(note_id_comment.2.0.into_iter().fold(0u64, |acc, digit| {
-            acc * 10
-                + digit
-                    .0
-                    .to_digit(10)
-                    .expect("We use RangedChar 0..=9, so there are only valid digits")
-                    as u64
-        }));
+        note_id = Some(NoteId(note_id_comment.2.0.into_iter().fold(
+            0u64,
+            |acc, digit| {
+                acc * 10
+                    + digit
+                        .0
+                        .to_digit(10)
+                        .expect("We use RangedChar 0..=9, so there are only valid digits")
+                        as u64
+            },
+        )));
     }
 
     // append path & headings
@@ -372,7 +372,12 @@ fn handle_cloze_lines(
 
     let remaining_length = cloze_lines.4.0;
 
-    clozes.push((string, note_id, remaining_length));
+    clozes.push(ClozeData {
+        contents: string,
+        note_id,
+        remaining_length,
+        pictures,
+    });
     Ok(())
 }
 

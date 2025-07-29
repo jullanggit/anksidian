@@ -12,7 +12,10 @@ use std::{
 use thiserror::Error;
 use ureq::http::StatusCode;
 
-use crate::{AGENT, DECK, handle_md::Picture};
+use crate::{
+    AGENT, DECK,
+    handle_md::{ClozeData, Picture},
+};
 
 // Handles interaction with AnkiConnect.
 // Could maybe use a bit more type-safety, stuff like action <-> params,
@@ -263,11 +266,7 @@ fn back_extra(pictures: &[Picture]) -> String {
         .collect()
 }
 
-pub fn add_cloze_note(
-    text: String,
-    tags: Vec<String>,
-    pictures: Vec<Picture>,
-) -> Result<NoteId, RequestError> {
+pub fn add_cloze_note(cloze: ClozeData, tags: Vec<String>) -> Result<NoteId, RequestError> {
     #[derive(Serialize, Debug)]
     #[serde(rename_all = "camelCase")]
     enum DuplicateScope {
@@ -302,27 +301,22 @@ pub fn add_cloze_note(
         deck_name: DECK.clone(),
         model_name: "Cloze".to_string(),
         fields: HashMap::from([
-            ("Text".to_string(), text.clone()),
-            ("Back Extra".to_string(), back_extra(&pictures)),
+            ("Text".to_string(), cloze.contents.clone()),
+            ("Back Extra".to_string(), back_extra(&cloze.pictures)),
         ]),
         options: Options {
             allow_duplicate: false,
             duplicate_scope: DuplicateScope::Deck,
         },
         tags: tags.clone(),
-        picture: pictures,
+        picture: cloze.pictures,
     };
     let request = Note { note: add_note };
 
     request.request()
 }
 
-pub fn update_cloze_note(
-    text: String,
-    id: NoteId,
-    tags: Vec<String>,
-    pictures: Vec<Picture>,
-) -> Result<(), RequestError> {
+pub fn update_cloze_note(cloze: ClozeData, tags: Vec<String>) -> Result<(), RequestError> {
     #[derive(Serialize, Debug)]
     struct StorePicture {
         path: PathBuf,
@@ -335,10 +329,10 @@ pub fn update_cloze_note(
         }
     }
 
-    let back_extra = back_extra(&pictures);
+    let back_extra = back_extra(&cloze.pictures);
 
     // store pictures to anki
-    for picture in pictures {
+    for picture in cloze.pictures {
         StorePicture {
             path: picture.path,
             filename: picture.filename,
@@ -348,10 +342,12 @@ pub fn update_cloze_note(
     // update note
     let update_note = UpdateNote {
         fields: HashMap::from([
-            ("Text".to_string(), text),
+            ("Text".to_string(), cloze.contents),
             ("Back Extra".to_string(), back_extra),
         ]),
-        id,
+        id: cloze
+            .note_id
+            .expect("Note id should be present in update path"),
         tags,
     };
     let request = Note { note: update_note };
