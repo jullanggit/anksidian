@@ -4,6 +4,7 @@ use std::{
     collections::HashMap,
     fmt::Debug,
     io::stdin,
+    path::PathBuf,
     sync::{Mutex, MutexGuard, PoisonError},
     thread::sleep,
     time::Duration,
@@ -308,21 +309,30 @@ pub fn add_cloze_note(
     request.request()
 }
 
-impl Request for Picture {
-    type Output = String;
-    fn action_type() -> ActionType {
-        ActionType::StoreMediaFile
-    }
-}
 pub fn update_cloze_note(
     text: String,
     id: NoteId,
     tags: Vec<String>,
     pictures: Vec<Picture>,
 ) -> Result<(), RequestError> {
+    #[derive(Serialize, Debug)]
+    struct StorePicture {
+        path: PathBuf,
+        filename: String,
+    }
+    impl Request for StorePicture {
+        type Output = String;
+        fn action_type() -> ActionType {
+            ActionType::StoreMediaFile
+        }
+    }
     // store pictures to anki
     for picture in pictures {
-        picture.request()?;
+        StorePicture {
+            path: picture.path,
+            filename: picture.filename,
+        }
+        .request()?;
     }
     // update note
     let update_note = UpdateNote {

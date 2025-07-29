@@ -376,8 +376,8 @@ fn handle_cloze_lines(
 
 #[derive(Clone, Debug, Serialize)]
 pub struct Picture {
-    path: PathBuf,
-    filename: String,
+    pub path: PathBuf,
+    pub filename: String,
     fields: String,
 }
 impl Picture {
