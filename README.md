@@ -21,6 +21,7 @@ Supported are:
 - Obsidian-style hyperlinks, including renamed hyperlinks ([[link|SomeRename]])
   - Images can also be included like this: `![[image.jpg]]`
   - jpg, jpeg, jxl, png, gif, bmp, svg, webp, apng, ico, tif, tiff and avif extensions are currently recognised. Please open a PR or issue if the format of your choice isn't yet included.
+  - Automatically converts .jxl files to normal jpeg, as anki doesn't yet support jpeg xl.
   - Currently images are always shown on the backside of cards, although being able to choose this is planned.
 - tags (#tag)
   - All tags in a file get added as Anki tags for all clozes in the file
