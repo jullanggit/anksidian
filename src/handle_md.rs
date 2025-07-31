@@ -435,6 +435,8 @@ fn maybe_handle_image(path: &Path, pictures: &mut Vec<Picture>) -> Option<()> {
                 Command::new("djxl")
                     .arg(path)
                     .arg(&out_path)
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
                     .spawn()
                     .ok()?
                     .wait()
