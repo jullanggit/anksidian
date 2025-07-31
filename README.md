@@ -45,5 +45,6 @@ Supported are:
 - parallel file handling (not really effective)
 - choose where images are shown
 - dont require typst and pandoc if typst isnt used.
+- italics & bold
 
 ![](https://brainmade.org/black-logo.svg)
