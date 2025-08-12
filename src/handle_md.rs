@@ -18,86 +18,463 @@ use tparse::*;
 
 // grammar
 
-// file
-type FileElement = Or<(ClozeLines, Heading, Tag, Code, Math, Link, char)>;
-type File = AllConsumed<Vec<FileElement>>;
-
-// newline
-type Newline = Or<(TStr<"\r">, TStr<"\n">, TStr<"\r\n">)>;
-
-// heading
-type Element = Or<(Code, Math, Link, char)>;
-type Heading = (
-    VecN<1, TStr<"#">>,
-    TStr<" ">,
-    Vec<(IsNot<Newline>, Element)>,
-    Newline,
-);
-
-// tag
-type Tag = (
-    TStr<"#">,
-    VecN<1, (IsNot<Or<(TStr<"#">, TStr<" ">, Newline)>>, char)>,
-);
-
-// Cloze
-type Cloze = (
-    TStr<"==">,
-    VecN<1, (IsNot<TStr<"==">>, Element)>,
-    TStr<"==">,
-);
-
-type ClozeLines = (
-    Vec<(IsNot<Or<(Cloze, Newline)>>, Element)>,
-    Cloze,
-    Vec<Or<(Cloze, (IsNot<Newline>, Element))>>,
-    Option<NoteIdComment>,
-    RemainingLength,
-);
+type File = AllConsumed<
+    Vec<
+        Or<(
+            (
+                Vec<(
+                    IsNot<
+                        Or<(
+                            (
+                                TStr<"==">,
+                                VecN<
+                                    1,
+                                    (
+                                        IsNot<TStr<"==">>,
+                                        Or<(
+                                            Or<(
+                                                (
+                                                    TStr<"`">,
+                                                    VecN<1, (IsNot<TStr<"`">>, char)>,
+                                                    TStr<"`">,
+                                                ),
+                                                (
+                                                    TStr<"```">,
+                                                    VecN<1, (IsNot<TStr<"```">>, char)>,
+                                                    TStr<"```">,
+                                                ),
+                                            )>,
+                                            Or<(
+                                                (
+                                                    TStr<"$">,
+                                                    VecN<1, (IsNot<TStr<"$">>, char)>,
+                                                    TStr<"$">,
+                                                ),
+                                                (
+                                                    TStr<"$$">,
+                                                    VecN<1, (IsNot<TStr<"$$">>, char)>,
+                                                    TStr<"$$">,
+                                                ),
+                                            )>,
+                                            (
+                                                Option<TStr<"!">>, // display
+                                                TStr<"[[">,
+                                                VecN<
+                                                    1,
+                                                    (
+                                                        IsNot<
+                                                            Or<(
+                                                                TStr<"]]">,
+                                                                Or<(
+                                                                    TStr<"\r">,
+                                                                    TStr<"\n">,
+                                                                    TStr<"\r\n">,
+                                                                )>,
+                                                                TStr<"|">,
+                                                            )>,
+                                                        >,
+                                                        char,
+                                                    ),
+                                                >,
+                                                Option<(
+                                                    TStr<"|">,
+                                                    VecN<
+                                                        1,
+                                                        (
+                                                            IsNot<
+                                                                Or<(
+                                                                    TStr<"]]">,
+                                                                    Or<(
+                                                                        TStr<"\r">,
+                                                                        TStr<"\n">,
+                                                                        TStr<"\r\n">,
+                                                                    )>,
+                                                                )>,
+                                                            >,
+                                                            char,
+                                                        ),
+                                                    >,
+                                                )>,
+                                                TStr<"]]">,
+                                            ),
+                                            char,
+                                        )>,
+                                    ),
+                                >,
+                                TStr<"==">,
+                            ),
+                            Or<(TStr<"\r">, TStr<"\n">, TStr<"\r\n">)>,
+                        )>,
+                    >,
+                    Or<(
+                        Or<(
+                            (TStr<"`">, VecN<1, (IsNot<TStr<"`">>, char)>, TStr<"`">),
+                            (
+                                TStr<"```">,
+                                VecN<1, (IsNot<TStr<"```">>, char)>,
+                                TStr<"```">,
+                            ),
+                        )>,
+                        Or<(
+                            (TStr<"$">, VecN<1, (IsNot<TStr<"$">>, char)>, TStr<"$">),
+                            (TStr<"$$">, VecN<1, (IsNot<TStr<"$$">>, char)>, TStr<"$$">),
+                        )>,
+                        (
+                            Option<TStr<"!">>, // display
+                            TStr<"[[">,
+                            VecN<
+                                1,
+                                (
+                                    IsNot<
+                                        Or<(
+                                            TStr<"]]">,
+                                            Or<(TStr<"\r">, TStr<"\n">, TStr<"\r\n">)>,
+                                            TStr<"|">,
+                                        )>,
+                                    >,
+                                    char,
+                                ),
+                            >,
+                            Option<(
+                                TStr<"|">,
+                                VecN<
+                                    1,
+                                    (
+                                        IsNot<
+                                            Or<(
+                                                TStr<"]]">,
+                                                Or<(TStr<"\r">, TStr<"\n">, TStr<"\r\n">)>,
+                                            )>,
+                                        >,
+                                        char,
+                                    ),
+                                >,
+                            )>,
+                            TStr<"]]">,
+                        ),
+                        char,
+                    )>,
+                )>,
+                (
+                    TStr<"==">,
+                    VecN<
+                        1,
+                        (
+                            IsNot<TStr<"==">>,
+                            Or<(
+                                Or<(
+                                    (TStr<"`">, VecN<1, (IsNot<TStr<"`">>, char)>, TStr<"`">),
+                                    (
+                                        TStr<"```">,
+                                        VecN<1, (IsNot<TStr<"```">>, char)>,
+                                        TStr<"```">,
+                                    ),
+                                )>,
+                                Or<(
+                                    (TStr<"$">, VecN<1, (IsNot<TStr<"$">>, char)>, TStr<"$">),
+                                    (TStr<"$$">, VecN<1, (IsNot<TStr<"$$">>, char)>, TStr<"$$">),
+                                )>,
+                                (
+                                    Option<TStr<"!">>, // display
+                                    TStr<"[[">,
+                                    VecN<
+                                        1,
+                                        (
+                                            IsNot<
+                                                Or<(
+                                                    TStr<"]]">,
+                                                    Or<(TStr<"\r">, TStr<"\n">, TStr<"\r\n">)>,
+                                                    TStr<"|">,
+                                                )>,
+                                            >,
+                                            char,
+                                        ),
+                                    >,
+                                    Option<(
+                                        TStr<"|">,
+                                        VecN<
+                                            1,
+                                            (
+                                                IsNot<
+                                                    Or<(
+                                                        TStr<"]]">,
+                                                        Or<(TStr<"\r">, TStr<"\n">, TStr<"\r\n">)>,
+                                                    )>,
+                                                >,
+                                                char,
+                                            ),
+                                        >,
+                                    )>,
+                                    TStr<"]]">,
+                                ),
+                                char,
+                            )>,
+                        ),
+                    >,
+                    TStr<"==">,
+                ),
+                Vec<
+                    Or<(
+                        (
+                            TStr<"==">,
+                            VecN<
+                                1,
+                                (
+                                    IsNot<TStr<"==">>,
+                                    Or<(
+                                        Or<(
+                                            (
+                                                TStr<"`">,
+                                                VecN<1, (IsNot<TStr<"`">>, char)>,
+                                                TStr<"`">,
+                                            ),
+                                            (
+                                                TStr<"```">,
+                                                VecN<1, (IsNot<TStr<"```">>, char)>,
+                                                TStr<"```">,
+                                            ),
+                                        )>,
+                                        Or<(
+                                            (
+                                                TStr<"$">,
+                                                VecN<1, (IsNot<TStr<"$">>, char)>,
+                                                TStr<"$">,
+                                            ),
+                                            (
+                                                TStr<"$$">,
+                                                VecN<1, (IsNot<TStr<"$$">>, char)>,
+                                                TStr<"$$">,
+                                            ),
+                                        )>,
+                                        (
+                                            Option<TStr<"!">>, // display
+                                            TStr<"[[">,
+                                            VecN<
+                                                1,
+                                                (
+                                                    IsNot<
+                                                        Or<(
+                                                            TStr<"]]">,
+                                                            Or<(
+                                                                TStr<"\r">,
+                                                                TStr<"\n">,
+                                                                TStr<"\r\n">,
+                                                            )>,
+                                                            TStr<"|">,
+                                                        )>,
+                                                    >,
+                                                    char,
+                                                ),
+                                            >,
+                                            Option<(
+                                                TStr<"|">,
+                                                VecN<
+                                                    1,
+                                                    (
+                                                        IsNot<
+                                                            Or<(
+                                                                TStr<"]]">,
+                                                                Or<(
+                                                                    TStr<"\r">,
+                                                                    TStr<"\n">,
+                                                                    TStr<"\r\n">,
+                                                                )>,
+                                                            )>,
+                                                        >,
+                                                        char,
+                                                    ),
+                                                >,
+                                            )>,
+                                            TStr<"]]">,
+                                        ),
+                                        char,
+                                    )>,
+                                ),
+                            >,
+                            TStr<"==">,
+                        ),
+                        (
+                            IsNot<Or<(TStr<"\r">, TStr<"\n">, TStr<"\r\n">)>>,
+                            Or<(
+                                Or<(
+                                    (TStr<"`">, VecN<1, (IsNot<TStr<"`">>, char)>, TStr<"`">),
+                                    (
+                                        TStr<"```">,
+                                        VecN<1, (IsNot<TStr<"```">>, char)>,
+                                        TStr<"```">,
+                                    ),
+                                )>,
+                                Or<(
+                                    (TStr<"$">, VecN<1, (IsNot<TStr<"$">>, char)>, TStr<"$">),
+                                    (TStr<"$$">, VecN<1, (IsNot<TStr<"$$">>, char)>, TStr<"$$">),
+                                )>,
+                                (
+                                    Option<TStr<"!">>, // display
+                                    TStr<"[[">,
+                                    VecN<
+                                        1,
+                                        (
+                                            IsNot<
+                                                Or<(
+                                                    TStr<"]]">,
+                                                    Or<(TStr<"\r">, TStr<"\n">, TStr<"\r\n">)>,
+                                                    TStr<"|">,
+                                                )>,
+                                            >,
+                                            char,
+                                        ),
+                                    >,
+                                    Option<(
+                                        TStr<"|">,
+                                        VecN<
+                                            1,
+                                            (
+                                                IsNot<
+                                                    Or<(
+                                                        TStr<"]]">,
+                                                        Or<(TStr<"\r">, TStr<"\n">, TStr<"\r\n">)>,
+                                                    )>,
+                                                >,
+                                                char,
+                                            ),
+                                        >,
+                                    )>,
+                                    TStr<"]]">,
+                                ),
+                                char,
+                            )>,
+                        ),
+                    )>,
+                >,
+                Option<(
+                    Or<(TStr<"\r">, TStr<"\n">, TStr<"\r\n">)>,
+                    TStr<NOTE_ID_COMMENT_START>,
+                    VecN<10, RangedChar<'0', '9'>>,
+                    TStr<NOTE_ID_COMMENT_END>,
+                    Option<Or<(TStr<"\r">, TStr<"\n">, TStr<"\r\n">)>>,
+                )>,
+                RemainingLength,
+            ),
+            (
+                VecN<1, TStr<"#">>,
+                TStr<" ">,
+                Vec<(
+                    IsNot<Or<(TStr<"\r">, TStr<"\n">, TStr<"\r\n">)>>,
+                    Or<(
+                        Or<(
+                            (TStr<"`">, VecN<1, (IsNot<TStr<"`">>, char)>, TStr<"`">),
+                            (
+                                TStr<"```">,
+                                VecN<1, (IsNot<TStr<"```">>, char)>,
+                                TStr<"```">,
+                            ),
+                        )>,
+                        Or<(
+                            (TStr<"$">, VecN<1, (IsNot<TStr<"$">>, char)>, TStr<"$">),
+                            (TStr<"$$">, VecN<1, (IsNot<TStr<"$$">>, char)>, TStr<"$$">),
+                        )>,
+                        (
+                            Option<TStr<"!">>, // display
+                            TStr<"[[">,
+                            VecN<
+                                1,
+                                (
+                                    IsNot<
+                                        Or<(
+                                            TStr<"]]">,
+                                            Or<(TStr<"\r">, TStr<"\n">, TStr<"\r\n">)>,
+                                            TStr<"|">,
+                                        )>,
+                                    >,
+                                    char,
+                                ),
+                            >,
+                            Option<(
+                                TStr<"|">,
+                                VecN<
+                                    1,
+                                    (
+                                        IsNot<
+                                            Or<(
+                                                TStr<"]]">,
+                                                Or<(TStr<"\r">, TStr<"\n">, TStr<"\r\n">)>,
+                                            )>,
+                                        >,
+                                        char,
+                                    ),
+                                >,
+                            )>,
+                            TStr<"]]">,
+                        ),
+                        char,
+                    )>,
+                )>,
+                Or<(TStr<"\r">, TStr<"\n">, TStr<"\r\n">)>,
+            ),
+            (
+                TStr<"#">,
+                VecN<
+                    1,
+                    (
+                        IsNot<
+                            Or<(
+                                TStr<"#">,
+                                TStr<" ">,
+                                Or<(TStr<"\r">, TStr<"\n">, TStr<"\r\n">)>,
+                            )>,
+                        >,
+                        char,
+                    ),
+                >,
+            ),
+            Or<(
+                (TStr<"`">, VecN<1, (IsNot<TStr<"`">>, char)>, TStr<"`">),
+                (
+                    TStr<"```">,
+                    VecN<1, (IsNot<TStr<"```">>, char)>,
+                    TStr<"```">,
+                ),
+            )>,
+            Or<(
+                (TStr<"$">, VecN<1, (IsNot<TStr<"$">>, char)>, TStr<"$">),
+                (TStr<"$$">, VecN<1, (IsNot<TStr<"$$">>, char)>, TStr<"$$">),
+            )>,
+            (
+                Option<TStr<"!">>, // display
+                TStr<"[[">,
+                VecN<
+                    1,
+                    (
+                        IsNot<
+                            Or<(
+                                TStr<"]]">,
+                                Or<(TStr<"\r">, TStr<"\n">, TStr<"\r\n">)>,
+                                TStr<"|">,
+                            )>,
+                        >,
+                        char,
+                    ),
+                >,
+                Option<(
+                    TStr<"|">,
+                    VecN<
+                        1,
+                        (
+                            IsNot<Or<(TStr<"]]">, Or<(TStr<"\r">, TStr<"\n">, TStr<"\r\n">)>)>>,
+                            char,
+                        ),
+                    >,
+                )>,
+                TStr<"]]">,
+            ),
+            char,
+        )>,
+    >,
+>;
 
 // note id comment
 const NOTE_ID_COMMENT_START: &str = "<!--NoteID:";
 const NOTE_ID_COMMENT_END: &str = "-->";
-type NoteIdComment = (
-    Newline,
-    TStr<NOTE_ID_COMMENT_START>,
-    VecN<10, RangedChar<'0', '9'>>,
-    TStr<NOTE_ID_COMMENT_END>,
-    Option<Newline>,
-);
-
-// code
-type Code = Or<(InlineCode, MultilineCode)>;
-// inline code
-type InlineCode = (TStr<"`">, VecN<1, (IsNot<TStr<"`">>, char)>, TStr<"`">);
-// display code
-type MultilineCode = (
-    TStr<"```">,
-    VecN<1, (IsNot<TStr<"```">>, char)>,
-    TStr<"```">,
-);
-
-// math
-type Math = Or<(InlineMath, DisplayMath)>;
-// inline math
-type InlineMath = (TStr<"$">, VecN<1, (IsNot<TStr<"$">>, char)>, TStr<"$">);
-// display math
-type DisplayMath = (TStr<"$$">, VecN<1, (IsNot<TStr<"$$">>, char)>, TStr<"$$">);
-
-// Link
-type LinkRenameSeparator = TStr<"|">;
-type Link = (
-    Option<TStr<"!">>, // display
-    TStr<"[[">,
-    VecN<1, (IsNot<Or<(TStr<"]]">, Newline, LinkRenameSeparator)>>, char)>,
-    Option<LinkRename>,
-    TStr<"]]">,
-);
-// LinkRename
-type LinkRename = (
-    LinkRenameSeparator,
-    VecN<1, (IsNot<Or<(TStr<"]]">, Newline)>>, char)>,
-);
 
 pub struct ClozeData {
     pub contents: String,
@@ -254,7 +631,57 @@ pub fn handle_md(path: &Path) -> Result<(), HandleMdError> {
 }
 
 fn handle_heading(
-    heading: Heading,
+    heading: (
+        VecN<1, TStr<"#">>,
+        TStr<" ">,
+        Vec<(
+            IsNot<Or<(TStr<"\r">, TStr<"\n">, TStr<"\r\n">)>>,
+            Or<(
+                Or<(
+                    (TStr<"`">, VecN<1, (IsNot<TStr<"`">>, char)>, TStr<"`">),
+                    (
+                        TStr<"```">,
+                        VecN<1, (IsNot<TStr<"```">>, char)>,
+                        TStr<"```">,
+                    ),
+                )>,
+                Or<(
+                    (TStr<"$">, VecN<1, (IsNot<TStr<"$">>, char)>, TStr<"$">),
+                    (TStr<"$$">, VecN<1, (IsNot<TStr<"$$">>, char)>, TStr<"$$">),
+                )>,
+                (
+                    Option<TStr<"!">>, // display
+                    TStr<"[[">,
+                    VecN<
+                        1,
+                        (
+                            IsNot<
+                                Or<(
+                                    TStr<"]]">,
+                                    Or<(TStr<"\r">, TStr<"\n">, TStr<"\r\n">)>,
+                                    TStr<"|">,
+                                )>,
+                            >,
+                            char,
+                        ),
+                    >,
+                    Option<(
+                        TStr<"|">,
+                        VecN<
+                            1,
+                            (
+                                IsNot<Or<(TStr<"]]">, Or<(TStr<"\r">, TStr<"\n">, TStr<"\r\n">)>)>>,
+                                char,
+                            ),
+                        >,
+                    )>,
+                    TStr<"]]">,
+                ),
+                char,
+            )>,
+        )>,
+        Or<(TStr<"\r">, TStr<"\n">, TStr<"\r\n">)>,
+    ),
     headings: &mut Vec<String>,
     pictures: &mut Vec<Picture>,
 ) -> Result<(), MathConvertError> {
@@ -282,7 +709,16 @@ fn handle_heading(
     Ok(())
 }
 
-fn code_to_string(code: Code) -> String {
+fn code_to_string(
+    code: Or<(
+        (TStr<"`">, VecN<1, (IsNot<TStr<"`">>, char)>, TStr<"`">),
+        (
+            TStr<"```">,
+            VecN<1, (IsNot<TStr<"```">>, char)>,
+            TStr<"```">,
+        ),
+    )>,
+) -> String {
     let matcher = code.matcher::<(), String>(());
     let matcher = AddMatcher::<0>::add_matcher(matcher, |code, _| {
         format!(
@@ -304,7 +740,49 @@ fn code_to_string(code: Code) -> String {
 }
 
 fn element_to_string(
-    element: Element,
+    element: Or<(
+        Or<(
+            (TStr<"`">, VecN<1, (IsNot<TStr<"`">>, char)>, TStr<"`">),
+            (
+                TStr<"```">,
+                VecN<1, (IsNot<TStr<"```">>, char)>,
+                TStr<"```">,
+            ),
+        )>,
+        Or<(
+            (TStr<"$">, VecN<1, (IsNot<TStr<"$">>, char)>, TStr<"$">),
+            (TStr<"$$">, VecN<1, (IsNot<TStr<"$$">>, char)>, TStr<"$$">),
+        )>,
+        (
+            Option<TStr<"!">>, // display
+            TStr<"[[">,
+            VecN<
+                1,
+                (
+                    IsNot<
+                        Or<(
+                            TStr<"]]">,
+                            Or<(TStr<"\r">, TStr<"\n">, TStr<"\r\n">)>,
+                            TStr<"|">,
+                        )>,
+                    >,
+                    char,
+                ),
+            >,
+            Option<(
+                TStr<"|">,
+                VecN<
+                    1,
+                    (
+                        IsNot<Or<(TStr<"]]">, Or<(TStr<"\r">, TStr<"\n">, TStr<"\r\n">)>)>>,
+                        char,
+                    ),
+                >,
+            )>,
+            TStr<"]]">,
+        ),
+        char,
+    )>,
     pictures: &mut Vec<Picture>,
 ) -> Result<String, MathConvertError> {
     let matcher = element.matcher(pictures);
@@ -318,7 +796,303 @@ fn element_to_string(
 }
 
 fn handle_cloze_lines(
-    cloze_lines: ClozeLines,
+    cloze_lines: (
+        Vec<(
+            IsNot<
+                Or<(
+                    (
+                        TStr<"==">,
+                        VecN<
+                            1,
+                            (
+                                IsNot<TStr<"==">>,
+                                Or<(
+                                    Or<(
+                                        (TStr<"`">, VecN<1, (IsNot<TStr<"`">>, char)>, TStr<"`">),
+                                        (
+                                            TStr<"```">,
+                                            VecN<1, (IsNot<TStr<"```">>, char)>,
+                                            TStr<"```">,
+                                        ),
+                                    )>,
+                                    Or<(
+                                        (TStr<"$">, VecN<1, (IsNot<TStr<"$">>, char)>, TStr<"$">),
+                                        (
+                                            TStr<"$$">,
+                                            VecN<1, (IsNot<TStr<"$$">>, char)>,
+                                            TStr<"$$">,
+                                        ),
+                                    )>,
+                                    (
+                                        Option<TStr<"!">>, // display
+                                        TStr<"[[">,
+                                        VecN<
+                                            1,
+                                            (
+                                                IsNot<
+                                                    Or<(
+                                                        TStr<"]]">,
+                                                        Or<(TStr<"\r">, TStr<"\n">, TStr<"\r\n">)>,
+                                                        TStr<"|">,
+                                                    )>,
+                                                >,
+                                                char,
+                                            ),
+                                        >,
+                                        Option<(
+                                            TStr<"|">,
+                                            VecN<
+                                                1,
+                                                (
+                                                    IsNot<
+                                                        Or<(
+                                                            TStr<"]]">,
+                                                            Or<(
+                                                                TStr<"\r">,
+                                                                TStr<"\n">,
+                                                                TStr<"\r\n">,
+                                                            )>,
+                                                        )>,
+                                                    >,
+                                                    char,
+                                                ),
+                                            >,
+                                        )>,
+                                        TStr<"]]">,
+                                    ),
+                                    char,
+                                )>,
+                            ),
+                        >,
+                        TStr<"==">,
+                    ),
+                    Or<(TStr<"\r">, TStr<"\n">, TStr<"\r\n">)>,
+                )>,
+            >,
+            Or<(
+                Or<(
+                    (TStr<"`">, VecN<1, (IsNot<TStr<"`">>, char)>, TStr<"`">),
+                    (
+                        TStr<"```">,
+                        VecN<1, (IsNot<TStr<"```">>, char)>,
+                        TStr<"```">,
+                    ),
+                )>,
+                Or<(
+                    (TStr<"$">, VecN<1, (IsNot<TStr<"$">>, char)>, TStr<"$">),
+                    (TStr<"$$">, VecN<1, (IsNot<TStr<"$$">>, char)>, TStr<"$$">),
+                )>,
+                (
+                    Option<TStr<"!">>, // display
+                    TStr<"[[">,
+                    VecN<
+                        1,
+                        (
+                            IsNot<
+                                Or<(
+                                    TStr<"]]">,
+                                    Or<(TStr<"\r">, TStr<"\n">, TStr<"\r\n">)>,
+                                    TStr<"|">,
+                                )>,
+                            >,
+                            char,
+                        ),
+                    >,
+                    Option<(
+                        TStr<"|">,
+                        VecN<
+                            1,
+                            (
+                                IsNot<Or<(TStr<"]]">, Or<(TStr<"\r">, TStr<"\n">, TStr<"\r\n">)>)>>,
+                                char,
+                            ),
+                        >,
+                    )>,
+                    TStr<"]]">,
+                ),
+                char,
+            )>,
+        )>,
+        (
+            TStr<"==">,
+            VecN<
+                1,
+                (
+                    IsNot<TStr<"==">>,
+                    Or<(
+                        Or<(
+                            (TStr<"`">, VecN<1, (IsNot<TStr<"`">>, char)>, TStr<"`">),
+                            (
+                                TStr<"```">,
+                                VecN<1, (IsNot<TStr<"```">>, char)>,
+                                TStr<"```">,
+                            ),
+                        )>,
+                        Or<(
+                            (TStr<"$">, VecN<1, (IsNot<TStr<"$">>, char)>, TStr<"$">),
+                            (TStr<"$$">, VecN<1, (IsNot<TStr<"$$">>, char)>, TStr<"$$">),
+                        )>,
+                        (
+                            Option<TStr<"!">>, // display
+                            TStr<"[[">,
+                            VecN<
+                                1,
+                                (
+                                    IsNot<
+                                        Or<(
+                                            TStr<"]]">,
+                                            Or<(TStr<"\r">, TStr<"\n">, TStr<"\r\n">)>,
+                                            TStr<"|">,
+                                        )>,
+                                    >,
+                                    char,
+                                ),
+                            >,
+                            Option<(
+                                TStr<"|">,
+                                VecN<
+                                    1,
+                                    (
+                                        IsNot<
+                                            Or<(
+                                                TStr<"]]">,
+                                                Or<(TStr<"\r">, TStr<"\n">, TStr<"\r\n">)>,
+                                            )>,
+                                        >,
+                                        char,
+                                    ),
+                                >,
+                            )>,
+                            TStr<"]]">,
+                        ),
+                        char,
+                    )>,
+                ),
+            >,
+            TStr<"==">,
+        ),
+        Vec<
+            Or<(
+                (
+                    TStr<"==">,
+                    VecN<
+                        1,
+                        (
+                            IsNot<TStr<"==">>,
+                            Or<(
+                                Or<(
+                                    (TStr<"`">, VecN<1, (IsNot<TStr<"`">>, char)>, TStr<"`">),
+                                    (
+                                        TStr<"```">,
+                                        VecN<1, (IsNot<TStr<"```">>, char)>,
+                                        TStr<"```">,
+                                    ),
+                                )>,
+                                Or<(
+                                    (TStr<"$">, VecN<1, (IsNot<TStr<"$">>, char)>, TStr<"$">),
+                                    (TStr<"$$">, VecN<1, (IsNot<TStr<"$$">>, char)>, TStr<"$$">),
+                                )>,
+                                (
+                                    Option<TStr<"!">>, // display
+                                    TStr<"[[">,
+                                    VecN<
+                                        1,
+                                        (
+                                            IsNot<
+                                                Or<(
+                                                    TStr<"]]">,
+                                                    Or<(TStr<"\r">, TStr<"\n">, TStr<"\r\n">)>,
+                                                    TStr<"|">,
+                                                )>,
+                                            >,
+                                            char,
+                                        ),
+                                    >,
+                                    Option<(
+                                        TStr<"|">,
+                                        VecN<
+                                            1,
+                                            (
+                                                IsNot<
+                                                    Or<(
+                                                        TStr<"]]">,
+                                                        Or<(TStr<"\r">, TStr<"\n">, TStr<"\r\n">)>,
+                                                    )>,
+                                                >,
+                                                char,
+                                            ),
+                                        >,
+                                    )>,
+                                    TStr<"]]">,
+                                ),
+                                char,
+                            )>,
+                        ),
+                    >,
+                    TStr<"==">,
+                ),
+                (
+                    IsNot<Or<(TStr<"\r">, TStr<"\n">, TStr<"\r\n">)>>,
+                    Or<(
+                        Or<(
+                            (TStr<"`">, VecN<1, (IsNot<TStr<"`">>, char)>, TStr<"`">),
+                            (
+                                TStr<"```">,
+                                VecN<1, (IsNot<TStr<"```">>, char)>,
+                                TStr<"```">,
+                            ),
+                        )>,
+                        Or<(
+                            (TStr<"$">, VecN<1, (IsNot<TStr<"$">>, char)>, TStr<"$">),
+                            (TStr<"$$">, VecN<1, (IsNot<TStr<"$$">>, char)>, TStr<"$$">),
+                        )>,
+                        (
+                            Option<TStr<"!">>, // display
+                            TStr<"[[">,
+                            VecN<
+                                1,
+                                (
+                                    IsNot<
+                                        Or<(
+                                            TStr<"]]">,
+                                            Or<(TStr<"\r">, TStr<"\n">, TStr<"\r\n">)>,
+                                            TStr<"|">,
+                                        )>,
+                                    >,
+                                    char,
+                                ),
+                            >,
+                            Option<(
+                                TStr<"|">,
+                                VecN<
+                                    1,
+                                    (
+                                        IsNot<
+                                            Or<(
+                                                TStr<"]]">,
+                                                Or<(TStr<"\r">, TStr<"\n">, TStr<"\r\n">)>,
+                                            )>,
+                                        >,
+                                        char,
+                                    ),
+                                >,
+                            )>,
+                            TStr<"]]">,
+                        ),
+                        char,
+                    )>,
+                ),
+            )>,
+        >,
+        Option<(
+            Or<(TStr<"\r">, TStr<"\n">, TStr<"\r\n">)>,
+            TStr<NOTE_ID_COMMENT_START>,
+            VecN<10, RangedChar<'0', '9'>>,
+            TStr<NOTE_ID_COMMENT_END>,
+            Option<Or<(TStr<"\r">, TStr<"\n">, TStr<"\r\n">)>>,
+        )>,
+        RemainingLength,
+    ),
     headings: &[String],
     clozes: &mut Vec<ClozeData>,
     path_str: &str,
@@ -333,7 +1107,64 @@ fn handle_cloze_lines(
     let mut note_id = None;
 
     fn add_cloze(
-        cloze: Cloze,
+        cloze: (
+            TStr<"==">,
+            VecN<
+                1,
+                (
+                    IsNot<TStr<"==">>,
+                    Or<(
+                        Or<(
+                            (TStr<"`">, VecN<1, (IsNot<TStr<"`">>, char)>, TStr<"`">),
+                            (
+                                TStr<"```">,
+                                VecN<1, (IsNot<TStr<"```">>, char)>,
+                                TStr<"```">,
+                            ),
+                        )>,
+                        Or<(
+                            (TStr<"$">, VecN<1, (IsNot<TStr<"$">>, char)>, TStr<"$">),
+                            (TStr<"$$">, VecN<1, (IsNot<TStr<"$$">>, char)>, TStr<"$$">),
+                        )>,
+                        (
+                            Option<TStr<"!">>, // display
+                            TStr<"[[">,
+                            VecN<
+                                1,
+                                (
+                                    IsNot<
+                                        Or<(
+                                            TStr<"]]">,
+                                            Or<(TStr<"\r">, TStr<"\n">, TStr<"\r\n">)>,
+                                            TStr<"|">,
+                                        )>,
+                                    >,
+                                    char,
+                                ),
+                            >,
+                            Option<(
+                                TStr<"|">,
+                                VecN<
+                                    1,
+                                    (
+                                        IsNot<
+                                            Or<(
+                                                TStr<"]]">,
+                                                Or<(TStr<"\r">, TStr<"\n">, TStr<"\r\n">)>,
+                                            )>,
+                                        >,
+                                        char,
+                                    ),
+                                >,
+                            )>,
+                            TStr<"]]">,
+                        ),
+                        char,
+                    )>,
+                ),
+            >,
+            TStr<"==">,
+        ),
         string: &mut String,
         cloze_num: &mut u8,
         pictures: &mut Vec<Picture>,
@@ -410,7 +1241,37 @@ impl Picture {
         }
     }
 }
-fn link_to_string(link: Link, pictures: &mut Vec<Picture>) -> String {
+fn link_to_string(
+    link: (
+        Option<TStr<"!">>, // display
+        TStr<"[[">,
+        VecN<
+            1,
+            (
+                IsNot<
+                    Or<(
+                        TStr<"]]">,
+                        Or<(TStr<"\r">, TStr<"\n">, TStr<"\r\n">)>,
+                        TStr<"|">,
+                    )>,
+                >,
+                char,
+            ),
+        >,
+        Option<(
+            TStr<"|">,
+            VecN<
+                1,
+                (
+                    IsNot<Or<(TStr<"]]">, Or<(TStr<"\r">, TStr<"\n">, TStr<"\r\n">)>)>>,
+                    char,
+                ),
+            >,
+        )>,
+        TStr<"]]">,
+    ),
+    pictures: &mut Vec<Picture>,
+) -> String {
     fn to_string<T: TParse>(vec: VecN<1, (IsNot<T>, char)>) -> String {
         vec.0.into_iter().map(|char| char.1).collect::<String>()
     }
@@ -483,7 +1344,12 @@ pub enum MathConvertError {
     TypstToLatex(#[from] TypstToLatexError),
 }
 /// Convert from Obsidian latex/typst to anki latex
-fn convert_math(math: Math) -> Result<String, MathConvertError> {
+fn convert_math(
+    math: Or<(
+        (TStr<"$">, VecN<1, (IsNot<TStr<"$">>, char)>, TStr<"$">),
+        (TStr<"$$">, VecN<1, (IsNot<TStr<"$$">>, char)>, TStr<"$$">),
+    )>,
+) -> Result<String, MathConvertError> {
     // extract inner math
     fn extract<T, U, V>(math: &(T, VecN<1, (U, char)>, V)) -> String {
         math.1.0.iter().map(|char| char.1).collect()
