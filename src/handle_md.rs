@@ -5,7 +5,7 @@ use std::{
     cmp::Ordering,
     env::temp_dir,
     ffi::OsStr,
-    fmt::{Display, Write as _},
+    fmt::Write as _,
     fs::{self, create_dir_all},
     io::{self, Write as _},
     path::{Path, PathBuf},
@@ -19,15 +19,14 @@ use tparse::*;
 // grammar
 
 // file
-Or! {FileElement, ClozeLines = ClozeLines, Heading = Heading, Tag = Tag,
-Code = Code, Math = Math, Link = Link, Char = char}
+type FileElement = Or<(ClozeLines, Heading, Tag, Code, Math, Link, char)>;
 type File = AllConsumed<Vec<FileElement>>;
 
 // newline
-Or! {Newline, Cr = TStr<"\r">, Lf = TStr<"\n">, CrLF = TStr<"\r\n">}
+type Newline = Or<(TStr<"\r">, TStr<"\n">, TStr<"\r\n">)>;
 
 // heading
-Or! {Element, Code = Code, Math = Math, Link = Link, Char = char}
+type Element = Or<(Code, Math, Link, char)>;
 type Heading = (
     VecN<1, TStr<"#">>,
     TStr<" ">,
@@ -36,8 +35,10 @@ type Heading = (
 );
 
 // tag
-type Tag = (TStr<"#">, VecN<1, (IsNot<DisallowedInTag>, char)>);
-Or! {DisallowedInTag, HashTag = TStr<"#">, Space = TStr<" ">, Newline = Newline}
+type Tag = (
+    TStr<"#">,
+    VecN<1, (IsNot<Or<(TStr<"#">, TStr<" ">, Newline)>>, char)>,
+);
 
 // Cloze
 type Cloze = (
@@ -46,12 +47,10 @@ type Cloze = (
     TStr<"==">,
 );
 
-Or! {ClozeOrNewline, Cloze = Cloze, Newline = Newline}
-Or! {NotNewlineClozeOrElement, Cloze = Cloze, NotNewlineElement = (IsNot<Newline>, Element)}
 type ClozeLines = (
-    Vec<(IsNot<ClozeOrNewline>, Element)>,
+    Vec<(IsNot<Or<(Cloze, Newline)>>, Element)>,
     Cloze,
-    Vec<NotNewlineClozeOrElement>,
+    Vec<Or<(Cloze, (IsNot<Newline>, Element))>>,
     Option<NoteIdComment>,
     RemainingLength,
 );
@@ -68,7 +67,7 @@ type NoteIdComment = (
 );
 
 // code
-Or! {Code, Inline = InlineCode, Multiline = MultilineCode}
+type Code = Or<(InlineCode, MultilineCode)>;
 // inline code
 type InlineCode = (TStr<"`">, VecN<1, (IsNot<TStr<"`">>, char)>, TStr<"`">);
 // display code
@@ -79,7 +78,7 @@ type MultilineCode = (
 );
 
 // math
-Or! {Math, Inline = InlineMath, Display = DisplayMath}
+type Math = Or<(InlineMath, DisplayMath)>;
 // inline math
 type InlineMath = (TStr<"$">, VecN<1, (IsNot<TStr<"$">>, char)>, TStr<"$">);
 // display math
@@ -87,19 +86,17 @@ type DisplayMath = (TStr<"$$">, VecN<1, (IsNot<TStr<"$$">>, char)>, TStr<"$$">);
 
 // Link
 type LinkRenameSeparator = TStr<"|">;
-Or! {DisallowedInLink, ClosingBrackets = TStr<"]]">, Newline = Newline, LinkRenameSeparator = LinkRenameSeparator}
 type Link = (
     Option<TStr<"!">>, // display
     TStr<"[[">,
-    VecN<1, (IsNot<DisallowedInLink>, char)>,
+    VecN<1, (IsNot<Or<(TStr<"]]">, Newline, LinkRenameSeparator)>>, char)>,
     Option<LinkRename>,
     TStr<"]]">,
 );
 // LinkRename
-Or! {DisallowedInLinkRename, ClosingBrackets = TStr<"]]">, Newline = Newline}
 type LinkRename = (
     LinkRenameSeparator,
-    VecN<1, (IsNot<DisallowedInLinkRename>, char)>,
+    VecN<1, (IsNot<Or<(TStr<"]]">, Newline)>>, char)>,
 );
 
 pub struct ClozeData {
@@ -139,30 +136,46 @@ pub fn handle_md(path: &Path) -> Result<(), HandleMdError> {
         .collect::<String>();
     path_str.truncate(path_str.len() - 3); // remove .md
 
-    let mut tags = Vec::new();
-    let mut headings = Vec::new();
-    let mut clozes = Vec::new();
+    let mut tags: Vec<String> = Vec::new();
+    let mut headings: Vec<String> = Vec::new();
+    let mut clozes: Vec<ClozeData> = Vec::new();
 
     for file_element in parsed.0.0 {
-        match file_element {
-            FileElement::ClozeLines(cloze_lines) => {
-                handle_cloze_lines(cloze_lines, &headings, &mut clozes, &path_str)?
-            }
-            FileElement::Heading(heading) => {
-                handle_heading(heading, &mut headings, &mut Vec::new())?
-            }
-            FileElement::Tag(tag) => tags.push(
+        let matcher: Matcher<_, _, _, _> = file_element.matcher::<_, Result<(), HandleMdError>>((
+            &mut headings,
+            &mut clozes,
+            &path_str,
+            &mut tags,
+        ));
+        let matcher = AddMatcher::<0>::add_matcher(
+            matcher,
+            |cloze_lines, (headings, clozes, path_str, _)| {
+                Ok(handle_cloze_lines(
+                    *cloze_lines,
+                    headings,
+                    clozes,
+                    path_str,
+                )?)
+            },
+        );
+        let matcher = AddMatcher::<1>::add_matcher(matcher, |heading, (headings, _, _, _)| {
+            Ok(handle_heading(*heading, headings, &mut Vec::new())?)
+        });
+        let matcher = AddMatcher::<2>::add_matcher(matcher, |tag, (_, _, _, tags)| {
+            #[expect(clippy::unit_arg)]
+            Ok(tags.push(
                 tag.0
                     .str()
                     .chars()
                     .chain(tag.1.0.into_iter().map(|char| char.1))
                     .collect::<String>(),
-            ),
-            FileElement::Code(_)
-            | FileElement::Math(_)
-            | FileElement::Link(_)
-            | FileElement::Char(_) => {}
-        }
+            ))
+        });
+        let matcher = AddMatcher::<3>::add_matcher(matcher, |_, _| Ok(()));
+        let matcher = AddMatcher::<4>::add_matcher(matcher, |_, _| Ok(()));
+        let matcher = AddMatcher::<5>::add_matcher(matcher, |_, _| Ok(()));
+        let matcher = AddMatcher::<6>::add_matcher(matcher, |_, _| Ok(()));
+        matcher.do_match()?;
     }
 
     let mut last_read = 0;
@@ -248,7 +261,7 @@ fn handle_heading(
     let level = heading.0.0.len();
     let mut contents = String::new();
     for (_, element) in heading.2 {
-        contents.push_str(&element.into_string(pictures)?);
+        contents.push_str(&element_to_string(element, pictures)?);
     }
 
     match level.cmp(&headings.len()) {
@@ -269,40 +282,39 @@ fn handle_heading(
     Ok(())
 }
 
-impl Display for Code {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Code::Inline(code) => {
-                write!(
-                    f,
-                    "{}{}{}",
-                    code.0.str(),
-                    code.1.0.iter().map(|char| char.1).collect::<String>(),
-                    code.2.str()
-                )
-            }
-            Code::Multiline(code) => {
-                write!(
-                    f,
-                    "{}{}{}",
-                    code.0.str(),
-                    code.1.0.iter().map(|char| char.1).collect::<String>(),
-                    code.2.str()
-                )
-            }
-        }
-    }
+fn code_to_string(code: Code) -> String {
+    let matcher = code.matcher::<(), String>(());
+    let matcher = AddMatcher::<0>::add_matcher(matcher, |code, _| {
+        format!(
+            "{}{}{}",
+            code.0.str(),
+            code.1.0.iter().map(|char| char.1).collect::<String>(),
+            code.2.str()
+        )
+    });
+    let matcher = matcher.add_matcher(|code, _| {
+        format!(
+            "{}{}{}",
+            code.0.str(),
+            code.1.0.iter().map(|char| char.1).collect::<String>(),
+            code.2.str()
+        )
+    });
+    matcher.do_match()
 }
 
-impl Element {
-    fn into_string(self, pictures: &mut Vec<Picture>) -> Result<String, MathConvertError> {
-        Ok(match self {
-            Element::Code(code) => code.to_string(),
-            Element::Math(math) => math.convert()?,
-            Element::Link(link) => link_to_string(link, pictures),
-            Element::Char(char) => char.to_string(),
-        })
-    }
+fn element_to_string(
+    element: Element,
+    pictures: &mut Vec<Picture>,
+) -> Result<String, MathConvertError> {
+    let matcher = element.matcher(pictures);
+    let matcher = AddMatcher::<0>::add_matcher(matcher, |code, _| Ok(code_to_string(*code)));
+    let matcher = AddMatcher::<1>::add_matcher(matcher, |math, _| convert_math(*math));
+    let matcher = AddMatcher::<2>::add_matcher(matcher, |link, pictures| {
+        Ok(link_to_string(*link, pictures))
+    });
+    let matcher = matcher.add_matcher(|char, _| Ok(char.to_string()));
+    matcher.do_match()
 }
 
 fn handle_cloze_lines(
@@ -314,7 +326,7 @@ fn handle_cloze_lines(
     let mut string = String::new();
     let mut pictures = Vec::new();
     for (_, element) in cloze_lines.0 {
-        string.push_str(&element.into_string(&mut pictures)?);
+        string.push_str(&element_to_string(element, &mut pictures)?);
     }
 
     let mut cloze_num: u8 = 0;
@@ -330,7 +342,7 @@ fn handle_cloze_lines(
 
         write!(string, "{{{{c{cloze_num}::").expect("Writing to string shouldn't fail");
         for (_, element) in cloze.1.0 {
-            string.push_str(&element.into_string(pictures)?);
+            string.push_str(&element_to_string(element, pictures)?);
         }
         string.push_str("}}");
         Ok(())
@@ -338,14 +350,16 @@ fn handle_cloze_lines(
     add_cloze(cloze_lines.1, &mut string, &mut cloze_num, &mut pictures)?;
 
     for element_or_cloze in cloze_lines.2 {
-        match element_or_cloze {
-            NotNewlineClozeOrElement::NotNewlineElement((_, element)) => {
-                string.push_str(&element.into_string(&mut pictures)?);
-            }
-            NotNewlineClozeOrElement::Cloze(cloze) => {
-                add_cloze(cloze, &mut string, &mut cloze_num, &mut pictures)?
-            }
-        }
+        let matcher = element_or_cloze.matcher((&mut string, &mut pictures, &mut cloze_num));
+        let matcher =
+            AddMatcher::<0>::add_matcher(matcher, |cloze, (string, pictures, cloze_num)| {
+                add_cloze(*cloze, string, cloze_num, pictures)
+            });
+        let matcher = matcher.add_matcher(|element, (string, pictures, _)| {
+            #[expect(clippy::unit_arg)]
+            Ok(string.push_str(&element_to_string(element.1, pictures)?))
+        });
+        matcher.do_match()?;
     }
     if let Some(note_id_comment) = cloze_lines.3 {
         note_id = Some(NoteId(note_id_comment.2.0.into_iter().fold(
@@ -468,36 +482,29 @@ pub enum MathConvertError {
     #[error("Converting typst to latex failed: {0}")]
     TypstToLatex(#[from] TypstToLatexError),
 }
-impl Math {
-    /// Convert from Obsidian latex/typst to anki latex
-    fn convert(&self) -> Result<String, MathConvertError> {
-        // extract inner math
-        fn extract<T, U, V>(math: &(T, VecN<1, (U, char)>, V)) -> String {
-            math.1.0.iter().map(|char| char.1).collect()
-        }
-        let inner = match self {
-            Self::Inline(inner) => extract(inner),
-            Self::Display(inner) => extract(inner),
-        };
-        let typst_style_math = match self {
-            Self::Inline(_) => format!("${inner}$"),
-            Self::Display(_) => format!("$ {inner} $"),
-        };
-
-        Ok(if is_typst(&typst_style_math)? {
-            typst_to_latex(&typst_style_math)?
-        } else {
-            match self {
-                Self::Inline(_) => {
-                    format!("\\({inner}\\)")
-                }
-                Self::Display(_) => {
-                    format!("\\[{inner}\\]")
-                }
-            }
-        }
-        .replace("}", "} ")) // avoid confusing anki with }}
+/// Convert from Obsidian latex/typst to anki latex
+fn convert_math(math: Math) -> Result<String, MathConvertError> {
+    // extract inner math
+    fn extract<T, U, V>(math: &(T, VecN<1, (U, char)>, V)) -> String {
+        math.1.0.iter().map(|char| char.1).collect()
     }
+    let matcher = math.matcher(());
+    let matcher = AddMatcher::<0>::add_matcher(matcher, |inner, _| {
+        let inner = extract(&inner);
+        (format!("${inner}$"), format!("\\({inner}\\)"))
+    });
+    let matcher = matcher.add_matcher(|inner, _| {
+        let inner = extract(&inner);
+        (format!("$ {inner} $"), format!("\\[{inner}\\]"))
+    });
+    let (typst_style_math, latex_style_math) = matcher.do_match();
+
+    Ok(if is_typst(&typst_style_math)? {
+        typst_to_latex(&typst_style_math)?
+    } else {
+        latex_style_math
+    }
+    .replace("}", "} ")) // avoid confusing anki with }}
 }
 
 #[derive(Error, Debug)]
