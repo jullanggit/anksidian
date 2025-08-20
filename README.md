@@ -46,5 +46,6 @@ Supported are:
 - choose where images are shown
 - dont require typst and pandoc if typst isnt used.
 - italics & bold
+- anki subdecks
 
 ![](https://brainmade.org/black-logo.svg)
