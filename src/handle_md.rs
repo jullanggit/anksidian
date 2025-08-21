@@ -1,4 +1,7 @@
-use crate::anki::{LockNotesError, NOTES, NoteId, add_cloze_note, update_cloze_note};
+use crate::{
+    CONFIG,
+    anki::{LockNotesError, NOTES, NoteId, add_cloze_note, update_cloze_note},
+};
 use log::error;
 use serde::Serialize;
 use std::{
@@ -114,6 +117,8 @@ pub enum HandleMdError {
     Lock(#[from] LockNotesError),
     #[error("Failed to convert math: {0}")]
     MathConvert(#[from] MathConvertError),
+    #[error("Failed to look up anki deck for path {0}")]
+    DeckLookup(PathBuf),
 }
 pub fn handle_md(path: &Path) -> Result<(), HandleMdError> {
     /// the approximate length of a note id comment in bytes.
@@ -210,13 +215,23 @@ pub fn handle_md(path: &Path) -> Result<(), HandleMdError> {
                 }
             }
             // add new note
-            None => match add_cloze_note(cloze, tags.iter().map(ToString::to_string).collect()) {
-                Ok(note_id) => Some(note_id),
-                Err(e) => {
-                    error!("{e}");
-                    None
+            None => {
+                let deck = &CONFIG
+                    .directory_to_deck
+                    .iter()
+                    .find(|mapping| {
+                        mapping.directory == path || mapping.directory.as_os_str() == "*"
+                    })
+                    .ok_or_else(|| HandleMdError::DeckLookup(path.to_path_buf()))?
+                    .deck;
+                match add_cloze_note(cloze, tags.iter().map(ToString::to_string).collect(), deck) {
+                    Ok(note_id) => Some(note_id),
+                    Err(e) => {
+                        error!("{e}");
+                        None
+                    }
                 }
-            },
+            }
         };
 
         out_string.push_str(&str[last_read..index]);

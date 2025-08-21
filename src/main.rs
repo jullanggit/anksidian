@@ -11,10 +11,10 @@ use log::trace;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
-    env::{self, VarError},
+    env::{self, VarError, home_dir},
     fmt::Display,
     fs::{self, File, OpenOptions},
-    io::{BufWriter, Read},
+    io::{self, BufWriter, Read},
     ops::Not,
     path::{Path, PathBuf},
     process::exit,
@@ -31,20 +31,62 @@ use crate::{
 mod anki;
 mod handle_md;
 
-static DECK: LazyLock<String> = LazyLock::new(|| {
-    let deck_name = env::args()
-        .nth(1)
-        .expect("The deck name should be passed as the first argument");
-    assert_ne!(
-        &deck_name[0..2],
-        "--",
-        "Deck name shouldn't start with '--'"
-    );
-    deck_name
+#[derive(Deserialize, Serialize, Clone)]
+struct Config {
+    directory_to_deck: Vec<DirectoryToDeck>,
+    ignore_paths: Vec<PathBuf>,
+}
+
+#[derive(Deserialize, Serialize, Clone)]
+struct DirectoryToDeck {
+    directory: PathBuf,
+    deck: String,
+}
+
+static CONFIG: LazyLock<Config> = LazyLock::new(|| {
+    let path = home_dir()
+        .expect("Failed to get home directory")
+        .join(".config/anksidian/config.json");
+
+    let config = if !fs::exists(&path).expect("Failed to check if folder to deck config exists") {
+        if let Err(err) = fs::create_dir_all(
+            path.parent()
+                .expect("Path always has a parent, as we join a multi-part path onto it."),
+        ) {
+            match err.kind() {
+                io::ErrorKind::AlreadyExists => {}
+                other => panic!("Failed to create parent dirs for folder to deck config: {other}"),
+            }
+        }
+
+        let default = Config {
+            directory_to_deck: vec![DirectoryToDeck {
+                directory: "*".into(),
+                deck: "Obsidian".to_string(),
+            }],
+            ignore_paths: vec!["./Excalidraw".into()],
+        };
+
+        let json = serde_json::to_string_pretty(&default)
+            .expect("Failed to serialize default folder to deck config");
+        fs::write(path, json).expect("Failed to write default folder to deck config");
+
+        default
+    } else {
+        let string = fs::read_to_string(path).expect("Failed to read folder to deck config");
+        serde_json::from_str(&string).expect("Failed to deserialize folder to deck config")
+    };
+
+    // ensure all decks mentioned in config exist
+    for DirectoryToDeck { deck, .. } in &config.directory_to_deck {
+        anki::ensure_deck_exists(deck).expect("Failed to ensure that deck exists")
+    }
+
+    config
 });
 static AGENT: LazyLock<Agent> = LazyLock::new(Agent::new_with_defaults);
-
-const IGNORE_PATHS: [&str; 1] = ["./Excalidraw"];
+static PWD: LazyLock<PathBuf> =
+    LazyLock::new(|| env::current_dir().expect("Failed to get current working directory"));
 
 /// Unwraps the result, display-printing and exiting the program on errors.
 fn exit_on_err<T, E: Display>(res: Result<T, E>, msg: &str) -> T {
@@ -104,8 +146,8 @@ enum FileCacheSaveError {
 
 #[derive(Serialize, Deserialize, Default)]
 struct FileCache {
-    /// deck -> file -> hash
-    hashes: HashMap<String, HashMap<PathBuf, Hash>>,
+    /// source_dir -> file -> hash
+    hashes: HashMap<PathBuf, HashMap<PathBuf, Hash>>,
 }
 impl FileCache {
     fn get_path() -> Result<PathBuf, VarError> {
@@ -184,11 +226,7 @@ fn traverse(dir: PathBuf, file_cache: &mut Option<FileCache>) -> Result<(), Trav
     {
         let path = entry.path();
         // recurse
-        if path.is_dir()
-            && !IGNORE_PATHS
-                .map(AsRef::<Path>::as_ref)
-                .contains(&path.as_path())
-        {
+        if path.is_dir() && !CONFIG.ignore_paths.contains(&path) {
             traverse(path, file_cache)?;
         // markdown file
         } else if path.is_file()
@@ -208,8 +246,8 @@ fn traverse(dir: PathBuf, file_cache: &mut Option<FileCache>) -> Result<(), Trav
                         error,
                         file: path.clone(),
                     })?;
-                    match file_cache.hashes.get_mut(&*DECK) {
-                        // deck is in cache
+                    match file_cache.hashes.get_mut(&*PWD) {
+                        // current dir is in cache
                         Some(deck_cache) => {
                             // file isn't in cache or hashes don't match
                             if deck_cache.get(&path) != Some(&file_hash) {
@@ -217,12 +255,12 @@ fn traverse(dir: PathBuf, file_cache: &mut Option<FileCache>) -> Result<(), Trav
                                 deck_cache.insert(path, file_hash);
                             }
                         }
-                        // deck is not in cache
+                        // current_dir is not in cache
                         None => {
                             handle_and_wrap_md(&path)?;
                             file_cache
                                 .hashes
-                                .insert(DECK.clone(), HashMap::from([(path, file_hash)]));
+                                .insert(PWD.clone(), HashMap::from([(path, file_hash)]));
                         }
                     }
                 }

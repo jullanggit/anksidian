@@ -13,7 +13,7 @@ use thiserror::Error;
 use ureq::http::StatusCode;
 
 use crate::{
-    AGENT, DECK,
+    AGENT, CONFIG,
     handle_md::{ClozeData, Picture},
 };
 
@@ -181,7 +181,12 @@ pub fn initialize_notes() -> Result<(), InitializeNotesError> {
     }
 
     let request = Query {
-        query: format!("\"deck:{}\"", &*DECK),
+        query: CONFIG
+            .directory_to_deck
+            .iter()
+            .map(|mapping| format!("\"deck:{}\"", mapping.deck))
+            .intersperse("OR".to_string())
+            .collect(),
     };
     let result = request.request()?;
 
@@ -266,7 +271,11 @@ fn back_extra(pictures: &[Picture]) -> String {
         .collect()
 }
 
-pub fn add_cloze_note(cloze: ClozeData, tags: Vec<String>) -> Result<NoteId, RequestError> {
+pub fn add_cloze_note(
+    cloze: ClozeData,
+    tags: Vec<String>,
+    deck: &str,
+) -> Result<NoteId, RequestError> {
     #[derive(Serialize, Debug)]
     #[serde(rename_all = "camelCase")]
     enum DuplicateScope {
@@ -295,10 +304,8 @@ pub fn add_cloze_note(cloze: ClozeData, tags: Vec<String>) -> Result<NoteId, Req
         }
     }
 
-    ensure_deck_exists()?;
-
     let add_note = AddNote {
-        deck_name: DECK.clone(),
+        deck_name: deck.to_string(),
         model_name: "Cloze".to_string(),
         fields: HashMap::from([
             ("Text".to_string(), cloze.contents.clone()),
@@ -360,7 +367,7 @@ pub fn update_cloze_note(cloze: ClozeData, tags: Vec<String>) -> Result<(), Requ
 }
 
 /// Ensures that the deck `DECK` exists
-fn ensure_deck_exists() -> Result<(), RequestError> {
+pub fn ensure_deck_exists(deck: &str) -> Result<(), RequestError> {
     #[derive(Serialize, Debug)]
     #[serde(rename_all = "camelCase")]
     struct CreateDeck {
@@ -373,6 +380,8 @@ fn ensure_deck_exists() -> Result<(), RequestError> {
         }
     }
 
-    let request = CreateDeck { deck: DECK.clone() };
+    let request = CreateDeck {
+        deck: deck.to_string(),
+    };
     request.request().map(|_: u64| {})
 }
