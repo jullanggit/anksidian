@@ -182,7 +182,7 @@ pub fn initialize_notes() -> Result<(), InitializeNotesError> {
 
     let request = Query {
         query: CONFIG
-            .directory_to_deck
+            .path_to_deck
             .iter()
             .map(|mapping| format!("\"deck:{}\"", mapping.deck))
             .intersperse("OR".to_string())

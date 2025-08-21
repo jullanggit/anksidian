@@ -8,6 +8,7 @@
 
 use blake3::{Hash, Hasher};
 use log::trace;
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
@@ -33,13 +34,30 @@ mod handle_md;
 
 #[derive(Deserialize, Serialize, Clone)]
 struct Config {
-    directory_to_deck: Vec<DirectoryToDeck>,
-    ignore_paths: Vec<PathBuf>,
+    path_to_deck: Vec<PathToDeck>,
+    #[serde(with = "serde_regex")]
+    ignore_paths: Vec<Regex>,
+}
+impl Default for Config {
+    fn default() -> Self {
+        Config {
+            path_to_deck: vec![PathToDeck {
+                path: Regex::new(".*").expect("Should be a valid regex"),
+                deck: "Obsidian".to_string(),
+            }],
+            ignore_paths: vec![Regex::new(".*Excalidraw").expect("Should be a valid regex")],
+        }
+    }
+}
+#[test]
+fn test_default_config() {
+    Config::default();
 }
 
 #[derive(Deserialize, Serialize, Clone)]
-struct DirectoryToDeck {
-    directory: PathBuf,
+struct PathToDeck {
+    #[serde(with = "serde_regex")]
+    path: Regex,
     deck: String,
 }
 
@@ -59,13 +77,7 @@ static CONFIG: LazyLock<Config> = LazyLock::new(|| {
             }
         }
 
-        let default = Config {
-            directory_to_deck: vec![DirectoryToDeck {
-                directory: "*".into(),
-                deck: "Obsidian".to_string(),
-            }],
-            ignore_paths: vec!["./Excalidraw".into()],
-        };
+        let default = Config::default();
 
         let json = serde_json::to_string_pretty(&default)
             .expect("Failed to serialize default folder to deck config");
@@ -78,7 +90,7 @@ static CONFIG: LazyLock<Config> = LazyLock::new(|| {
     };
 
     // ensure all decks mentioned in config exist
-    for DirectoryToDeck { deck, .. } in &config.directory_to_deck {
+    for PathToDeck { deck, .. } in &config.path_to_deck {
         anki::ensure_deck_exists(deck).expect("Failed to ensure that deck exists")
     }
 
@@ -226,7 +238,12 @@ fn traverse(dir: PathBuf, file_cache: &mut Option<FileCache>) -> Result<(), Trav
     {
         let path = entry.path();
         // recurse
-        if path.is_dir() && !CONFIG.ignore_paths.contains(&path) {
+        if path.is_dir()
+            && !CONFIG
+                .ignore_paths
+                .iter()
+                .any(|ignore_path| ignore_path.is_match(&path.to_string_lossy()))
+        {
             traverse(path, file_cache)?;
         // markdown file
         } else if path.is_file()

@@ -117,7 +117,7 @@ pub enum HandleMdError {
     Lock(#[from] LockNotesError),
     #[error("Failed to convert math: {0}")]
     MathConvert(#[from] MathConvertError),
-    #[error("Failed to look up anki deck for path {0}")]
+    #[error("No matching anki deck found for path {0}")]
     DeckLookup(PathBuf),
 }
 pub fn handle_md(path: &Path) -> Result<(), HandleMdError> {
@@ -217,11 +217,9 @@ pub fn handle_md(path: &Path) -> Result<(), HandleMdError> {
             // add new note
             None => {
                 let deck = &CONFIG
-                    .directory_to_deck
+                    .path_to_deck
                     .iter()
-                    .find(|mapping| {
-                        mapping.directory == path || mapping.directory.as_os_str() == "*"
-                    })
+                    .find(|mapping| mapping.path.is_match(&path.to_string_lossy()))
                     .ok_or_else(|| HandleMdError::DeckLookup(path.to_path_buf()))?
                     .deck;
                 match add_cloze_note(cloze, tags.iter().map(ToString::to_string).collect(), deck) {
