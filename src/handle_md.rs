@@ -119,6 +119,8 @@ pub enum HandleMdError {
     MathConvert(#[from] MathConvertError),
     #[error("No matching anki deck found for path {0}")]
     DeckLookup(PathBuf),
+    #[error("Failed to canonicalize (expand) path {path}: {error}")]
+    CanonicalizePath { path: PathBuf, error: io::Error },
 }
 pub fn handle_md(path: &Path) -> Result<(), HandleMdError> {
     /// the approximate length of a note id comment in bytes.
@@ -216,10 +218,16 @@ pub fn handle_md(path: &Path) -> Result<(), HandleMdError> {
             }
             // add new note
             None => {
+                let canonicalized =
+                    path.canonicalize()
+                        .map_err(|error| HandleMdError::CanonicalizePath {
+                            path: path.to_path_buf(),
+                            error,
+                        })?;
                 let deck = &CONFIG
                     .path_to_deck
                     .iter()
-                    .find(|mapping| mapping.path.is_match(&path.to_string_lossy()))
+                    .find(|mapping| mapping.path.is_match(&canonicalized.to_string_lossy()))
                     .ok_or_else(|| HandleMdError::DeckLookup(path.to_path_buf()))?
                     .deck;
                 match add_cloze_note(cloze, tags.iter().map(ToString::to_string).collect(), deck) {

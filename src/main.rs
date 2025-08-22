@@ -228,6 +228,8 @@ enum TraverseError {
         error: std::io::Error,
         file: PathBuf,
     },
+    #[error("Failed to canonicalize (expand) path {path}: {error}")]
+    CanonicalizePath { path: PathBuf, error: io::Error },
 }
 fn traverse(dir: PathBuf, file_cache: &mut Option<FileCache>) -> Result<(), TraverseError> {
     trace!("Recursing into dir {}", dir.display());
@@ -237,12 +239,18 @@ fn traverse(dir: PathBuf, file_cache: &mut Option<FileCache>) -> Result<(), Trav
         .flatten()
     {
         let path = entry.path();
+        let canonicalized =
+            path.canonicalize()
+                .map_err(|error| TraverseError::CanonicalizePath {
+                    path: path.to_path_buf(),
+                    error,
+                })?;
         // recurse
         if path.is_dir()
             && !CONFIG
                 .ignore_paths
                 .iter()
-                .any(|ignore_path| ignore_path.is_match(&path.to_string_lossy()))
+                .any(|ignore_path| ignore_path.is_match(&canonicalized.to_string_lossy()))
         {
             traverse(path, file_cache)?;
         // markdown file
