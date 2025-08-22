@@ -40,9 +40,9 @@ Supported are:
 Anksidian's config is located at ~/.config/anksidian/config.json and will be created on the first run.
 It currently contains two config values:
 - ignore_paths:
-  - is a list of all the paths anksidian should ignore
-- directory_to_deck:
-  - a mapping of folder names to anki decks, that anksidian should use
+  - is a list of all the paths (or regexes) anksidian should ignore
+- path_to_deck:
+  - a mapping of paths (or regexes) to anki decks, that anksidian should use
   - is evaluated in the order specifified in the config
   - "*" is used as a fallback to match any remaining folders
 
@@ -54,6 +54,5 @@ It currently contains two config values:
 - choose where images are shown
 - dont require typst and pandoc if typst isnt used.
 - italics & bold
-- anki subdecks
 
 ![](https://brainmade.org/black-logo.svg)
