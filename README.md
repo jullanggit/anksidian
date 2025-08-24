@@ -54,5 +54,6 @@ It currently contains two config values:
 - choose where images are shown
 - dont require typst and pandoc if typst isnt used.
 - italics & bold
+- fix off-by-one somewhere in the heading logic
 
 ![](https://brainmade.org/black-logo.svg)
