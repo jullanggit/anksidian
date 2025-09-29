@@ -92,6 +92,7 @@ type LinkRenameSeparator = TStr<"|">;
 type Link = (
     Option<TStr<"!">>, // display
     TStr<"[[">,
+    Option<TStr<"#">>, // file-local heading
     VecN<1, (IsNot<Or<(TStr<"]]">, Newline, LinkRenameSeparator)>>, char)>,
     Option<LinkRename>,
     TStr<"]]">,
@@ -435,10 +436,10 @@ fn link_to_string(link: Link, pictures: &mut Vec<Picture>) -> String {
     fn to_string<T: TParse>(vec: VecN<1, (IsNot<T>, char)>) -> String {
         vec.0.into_iter().map(|char| char.1).collect::<String>()
     }
-    let contents = if let Some(rename) = link.3 {
+    let contents = if let Some(rename) = link.4 {
         to_string(rename.1)
     } else {
-        to_string(link.2)
+        to_string(link.3)
     };
     // handle images only if they are displayed
     if link.0.is_some() && maybe_handle_image(Path::new(&contents), pictures).is_some() {
