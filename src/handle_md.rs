@@ -439,6 +439,7 @@ fn link_to_string(link: Link, pictures: &mut Vec<Picture>) -> String {
     let contents = if let Some(rename) = link.4 {
         to_string(rename.1)
     } else {
+        // '#' for file-local headings (link.2) never included, to match obsidians (and my preferred) behaviour of rendering '[[#some heading]]' to 'some heading'
         to_string(link.3)
     };
     // handle images only if they are displayed
