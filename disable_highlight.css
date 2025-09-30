@@ -1,0 +1,8 @@
+.markdown-preview-view mark,
+.markdown-rendered mark,
+.cm-s-obsidian span.cm-formatting-highlight,
+.cm-s-obsidian span.cm-highlight {
+  background-color: inherit;
+  color: inherit;
+  font-weight: normal;
+}

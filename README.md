@@ -6,6 +6,7 @@ This is currently pretty hard-coded for my use-case, feel free to open an issue 
 That being said, here's an outline of the mentioned use-case:
 
 - Highlight (==text==) anything you want to make a cloze-style flashcard
+  - For Obsidian you might want to include the `disable_highlight.css` snippet, to disable the default highlighting
 - Setup AnkiConnect
 - Have Anki open
 - Run the cli in a directory with Markdown files
