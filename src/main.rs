@@ -118,9 +118,9 @@ fn main() {
 
     exit_on_err(initialize_notes(), "Failed to initialize notes");
 
-    let track_seen = env::args().skip(2).any(|arg| &arg == "--track-seen");
+    let track_seen = env::args().skip(1).any(|arg| &arg == "--track-seen");
     let mut file_cache = env::args()
-        .skip(2)
+        .skip(1)
         .any(|arg| &arg == "--no-cache")
         .not()
         .then(|| match FileCache::load() {
