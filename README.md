@@ -35,11 +35,15 @@ Supported are:
 
 ## Arguments
 
-`anksidian [--no-cache]`
-`--no-cache`:
+`anksidian [--track-seen] [--no-cache]`
 
-- do not use the file cache (located at `~/.cache/anksidian/file_cache.json`)
-- ask for deletion of unseen notes
+`--track-seen`
+  - track whether notes were seen in unchanged files
+
+`--no-cache`
+  - do not use the file cache (located at `~/.cache/anksidian/file_cache.json`)
+
+Both `--track-seen` and `--no-cache` enable anksidian to detect when a note was deleted in your files, but not from Anki, and will ask to do so for you.
 
 ## Config
 

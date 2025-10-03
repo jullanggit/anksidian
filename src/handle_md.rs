@@ -1,8 +1,8 @@
 use crate::{
-    CONFIG,
+    CONFIG, FileCache,
     anki::{LockNotesError, NOTES, NoteId, add_cloze_note, update_cloze_note},
 };
-use log::error;
+use log::{error, warn};
 use serde::Serialize;
 use std::{
     cmp::Ordering,
@@ -198,7 +198,11 @@ pub fn handle_md(path: &Path) -> Result<(), HandleMdError> {
                     || note.fields["Text"] == cloze.contents
             })
             .map(|(note, seen)| {
-                *seen = true;
+                if *seen {
+                    warn!("Note found more than once: {:?}", note);
+                } else {
+                    *seen = true;
+                }
                 note.id
             });
 
@@ -384,17 +388,7 @@ fn handle_cloze_lines(
         matcher.do_match()?;
     }
     if let Some(note_id_comment) = cloze_lines.3 {
-        note_id = Some(NoteId(note_id_comment.2.0.into_iter().fold(
-            0u64,
-            |acc, digit| {
-                acc * 10
-                    + digit
-                        .0
-                        .to_digit(10)
-                        .expect("We use RangedChar 0..=9, so there are only valid digits")
-                        as u64
-            },
-        )));
+        note_id = Some(extract_note_id(note_id_comment));
     }
 
     // append path & headings
@@ -599,4 +593,74 @@ fn typst_to_latex(typst: &str) -> Result<String, TypstToLatexError> {
     stdout.truncate(stdout.len() - 1);
 
     String::from_utf8(stdout).map_err(TypstToLatexError::Utf8)
+}
+
+#[derive(Error, Debug)]
+pub enum MarkNotesAsSeenError {
+    #[error("Reading file ({file}) failed: {error}")]
+    ReadFile { file: PathBuf, error: io::Error },
+    #[error("Failed to lock NOTES: {0}")]
+    Lock(#[from] LockNotesError),
+}
+/// Parse the file and mark any notes contained as seen in `NOTES`
+pub fn mark_notes_as_seen(file: &Path) -> Result<(), MarkNotesAsSeenError> {
+    let str = fs::read_to_string(file).map_err(|error| MarkNotesAsSeenError::ReadFile {
+        file: file.to_path_buf(),
+        error,
+    })?;
+
+    let parsed = File::tparse(&str)
+        .expect("Parsing file can't fail, as it includes a Vec<char> option, that always matches");
+
+    for file_element in parsed.0.0 {
+        let matcher: Matcher<_, _, _, _> =
+            file_element.matcher::<_, Result<(), MarkNotesAsSeenError>>(());
+        let matcher = AddMatcher::<0>::add_matcher(matcher, |cloze_lines, _| {
+            if let Some(note_id) = cloze_lines.3 {
+                let note_id = extract_note_id(note_id);
+                let mut lock = NOTES.lock()?;
+                let note = lock.iter_mut().find(|(note, _)| note.id == note_id);
+
+                match note {
+                    Some((note, seen)) => {
+                        if *seen {
+                            warn!("Note found more than once: {:?}", note);
+                        } else {
+                            *seen = true;
+                        }
+                    }
+                    None => {
+                        warn!(
+                            "Note not present in Anki found in unchanged file, not updating.\nTo update, modify the file or remove the file cache at {}",
+                            FileCache::get_path().map_or(
+                                String::from("~/.cache/anksidian/file_cache.json"),
+                                |path| path.to_string_lossy().to_string()
+                            )
+                        )
+                    }
+                }
+            }
+            Ok(())
+        });
+        let matcher = AddMatcher::<1>::add_matcher(matcher, |_, _| Ok(()));
+        let matcher = AddMatcher::<2>::add_matcher(matcher, |_, _| Ok(()));
+        let matcher = AddMatcher::<3>::add_matcher(matcher, |_, _| Ok(()));
+        let matcher = AddMatcher::<4>::add_matcher(matcher, |_, _| Ok(()));
+        let matcher = AddMatcher::<5>::add_matcher(matcher, |_, _| Ok(()));
+        let matcher = AddMatcher::<6>::add_matcher(matcher, |_, _| Ok(()));
+        matcher.do_match()?;
+    }
+
+    Ok(())
+}
+
+fn extract_note_id(note_id_comment: NoteIdComment) -> NoteId {
+    NoteId(note_id_comment.2.0.into_iter().fold(0u64, |acc, digit| {
+        acc * 10
+            + digit
+                .0
+                .to_digit(10)
+                .expect("We use RangedChar 0..=9, so there are only valid digits")
+                as u64
+    }))
 }
