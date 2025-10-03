@@ -1,6 +1,6 @@
 use crate::{
+    anki::{add_cloze_note, update_cloze_note, LockNotesError, NoteId, NOTES},
     CONFIG,
-    anki::{LockNotesError, NOTES, NoteId, add_cloze_note, update_cloze_note},
 };
 use log::error;
 use serde::Serialize;
@@ -148,7 +148,7 @@ pub fn handle_md(path: &Path) -> Result<(), HandleMdError> {
     let mut headings: Vec<String> = Vec::new();
     let mut clozes: Vec<ClozeData> = Vec::new();
 
-    for file_element in parsed.0.0 {
+    for file_element in parsed.0 .0 {
         let matcher: Matcher<_, _, _, _> = file_element.matcher::<_, Result<(), HandleMdError>>((
             &mut headings,
             &mut clozes,
@@ -175,7 +175,7 @@ pub fn handle_md(path: &Path) -> Result<(), HandleMdError> {
                 tag.0
                     .str()
                     .chars()
-                    .chain(tag.1.0.into_iter().map(|char| char.1))
+                    .chain(tag.1 .0.into_iter().map(|char| char.1))
                     .collect::<String>(),
             ))
         });
@@ -280,7 +280,7 @@ fn handle_heading(
     headings: &mut Vec<String>,
     pictures: &mut Vec<Picture>,
 ) -> Result<(), MathConvertError> {
-    let level = heading.0.0.len();
+    let level = heading.0 .0.len();
     let mut contents = String::new();
     for (_, element) in heading.2 {
         contents.push_str(&element_to_string(element, pictures)?);
@@ -310,7 +310,7 @@ fn code_to_string(code: Code) -> String {
         format!(
             "{}{}{}",
             code.0.str(),
-            code.1.0.iter().map(|char| char.1).collect::<String>(),
+            code.1 .0.iter().map(|char| char.1).collect::<String>(),
             code.2.str()
         )
     });
@@ -318,7 +318,7 @@ fn code_to_string(code: Code) -> String {
         format!(
             "{}{}{}",
             code.0.str(),
-            code.1.0.iter().map(|char| char.1).collect::<String>(),
+            code.1 .0.iter().map(|char| char.1).collect::<String>(),
             code.2.str()
         )
     });
@@ -363,7 +363,7 @@ fn handle_cloze_lines(
         *cloze_num += 1;
 
         write!(string, "{{{{c{cloze_num}::").expect("Writing to string shouldn't fail");
-        for (_, element) in cloze.1.0 {
+        for (_, element) in cloze.1 .0 {
             string.push_str(&element_to_string(element, pictures)?);
         }
         string.push_str("}}");
@@ -384,7 +384,7 @@ fn handle_cloze_lines(
         matcher.do_match()?;
     }
     if let Some(note_id_comment) = cloze_lines.3 {
-        note_id = Some(NoteId(note_id_comment.2.0.into_iter().fold(
+        note_id = Some(NoteId(note_id_comment.2 .0.into_iter().fold(
             0u64,
             |acc, digit| {
                 acc * 10
@@ -406,7 +406,7 @@ fn handle_cloze_lines(
         }
     }
 
-    let remaining_length = cloze_lines.4.0;
+    let remaining_length = cloze_lines.4 .0;
 
     clozes.push(ClozeData {
         contents: string,
@@ -509,7 +509,7 @@ pub enum MathConvertError {
 fn convert_math(math: Math) -> Result<String, MathConvertError> {
     // extract inner math
     fn extract<T, U, V>(math: &(T, VecN<1, (U, char)>, V)) -> String {
-        math.1.0.iter().map(|char| char.1).collect()
+        math.1 .0.iter().map(|char| char.1).collect()
     }
     let matcher = math.matcher(());
     let matcher = AddMatcher::<0>::add_matcher(matcher, |inner, _| {
@@ -522,7 +522,7 @@ fn convert_math(math: Math) -> Result<String, MathConvertError> {
     });
     let (typst_style_math, latex_style_math) = matcher.do_match();
 
-    Ok(if is_typst(&typst_style_math)? {
+    Ok(if is_typst(&typst_style_math)? && !CONFIG.disable_typst {
         typst_to_latex(&typst_style_math)?
     } else {
         latex_style_math

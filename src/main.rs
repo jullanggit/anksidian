@@ -37,6 +37,7 @@ struct Config {
     path_to_deck: Vec<PathToDeck>,
     #[serde(with = "serde_regex")]
     ignore_paths: Vec<Regex>,
+    disable_typst: bool,
 }
 impl Default for Config {
     fn default() -> Self {
@@ -46,6 +47,7 @@ impl Default for Config {
                 deck: "Obsidian".to_string(),
             }],
             ignore_paths: vec![Regex::new(".*Excalidraw").expect("Should be a valid regex")],
+            disable_typst: false,
         }
     }
 }
@@ -88,6 +90,7 @@ static CONFIG: LazyLock<Config> = LazyLock::new(|| {
         let string = fs::read_to_string(path).expect("Failed to read folder to deck config");
         serde_json::from_str(&string).expect("Failed to deserialize folder to deck config")
     };
+
 
     // ensure all decks mentioned in config exist
     for PathToDeck { deck, .. } in &config.path_to_deck {
