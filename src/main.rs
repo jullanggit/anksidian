@@ -118,7 +118,7 @@ fn main() {
 
     exit_on_err(initialize_notes(), "Failed to initialize notes");
 
-    let track_seen = env::args().skip(2).any(|arg| &arg == "--track_seen");
+    let track_seen = env::args().skip(2).any(|arg| &arg == "--track-seen");
     let mut file_cache = env::args()
         .skip(2)
         .any(|arg| &arg == "--no-cache")
@@ -138,8 +138,10 @@ fn main() {
     );
 
     // handle unseen notes if we have seen all present notes
-    if file_cache.is_none() || track_seen {
-        exit_on_err(handle_unseen_notes(), "Failed to handle unseen notes");
+    if (file_cache.is_none() || track_seen)
+        && let Err(err) = handle_unseen_notes()
+    {
+        log::error!("Failed to handle unseen notes: {err}");
     };
 
     // save file cache
