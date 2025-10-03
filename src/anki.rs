@@ -1,5 +1,5 @@
 use log::{debug, warn};
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{
     collections::HashMap,
     fmt::Debug,
@@ -13,8 +13,8 @@ use thiserror::Error;
 use ureq::http::StatusCode;
 
 use crate::{
-    AGENT, CONFIG,
     handle_md::{ClozeData, Picture},
+    AGENT, CONFIG,
 };
 
 // Handles interaction with AnkiConnect.

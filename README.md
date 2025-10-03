@@ -52,6 +52,8 @@ It currently contains two config values:
   - a mapping of paths (or regexes) to anki decks, that anksidian should use
   - is evaluated in the order specifified in the config
   - "*" is used as a fallback to match any remaining folders
+- disable_typst
+  - is a bool to disable typst to latex conversion
 
 ## Example
 

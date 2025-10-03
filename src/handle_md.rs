@@ -1,6 +1,6 @@
 use crate::{
+    anki::{add_cloze_note, update_cloze_note, LockNotesError, NoteId, NOTES},
     CONFIG,
-    anki::{LockNotesError, NOTES, NoteId, add_cloze_note, update_cloze_note},
 };
 use log::error;
 use serde::Serialize;
@@ -522,7 +522,7 @@ fn convert_math(math: Math) -> Result<String, MathConvertError> {
     });
     let (typst_style_math, latex_style_math) = matcher.do_match();
 
-    Ok(if is_typst(&typst_style_math)? {
+    Ok(if is_typst(&typst_style_math)? && !CONFIG.disable_typst {
         typst_to_latex(&typst_style_math)?
     } else {
         latex_style_math

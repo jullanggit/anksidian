@@ -37,6 +37,7 @@ struct Config {
     path_to_deck: Vec<PathToDeck>,
     #[serde(with = "serde_regex")]
     ignore_paths: Vec<Regex>,
+    disable_typst: bool,
 }
 impl Default for Config {
     fn default() -> Self {
@@ -46,6 +47,7 @@ impl Default for Config {
                 deck: "Obsidian".to_string(),
             }],
             ignore_paths: vec![Regex::new(".*Excalidraw").expect("Should be a valid regex")],
+            disable_typst: false,
         }
     }
 }
