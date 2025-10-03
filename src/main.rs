@@ -91,7 +91,6 @@ static CONFIG: LazyLock<Config> = LazyLock::new(|| {
         serde_json::from_str(&string).expect("Failed to deserialize folder to deck config")
     };
 
-
     // ensure all decks mentioned in config exist
     for PathToDeck { deck, .. } in &config.path_to_deck {
         anki::ensure_deck_exists(deck).expect("Failed to ensure that deck exists")
