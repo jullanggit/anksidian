@@ -189,7 +189,7 @@ pub fn handle_md(path: &Path) -> Result<(), HandleMdError> {
     let mut last_read = 0;
     let mut out_string =
         String::with_capacity(str.len() + clozes.len() * APPROX_LEN_NOTE_ID_COMMENT);
-    for cloze in clozes {
+    for mut cloze in clozes {
         let actual_note_id = NOTES
             .lock()?
             .iter_mut()
@@ -203,6 +203,7 @@ pub fn handle_md(path: &Path) -> Result<(), HandleMdError> {
                 } else {
                     *seen = true;
                 }
+                cloze.note_id = Some(note.id);
                 note.id
             });
 
