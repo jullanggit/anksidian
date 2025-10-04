@@ -1,6 +1,6 @@
 use crate::{
-    anki::{add_cloze_note, update_cloze_note, LockNotesError, NoteId, NOTES},
     CONFIG,
+    anki::{LockNotesError, NOTES, NoteId, add_cloze_note, update_cloze_note},
 };
 use log::error;
 use serde::Serialize;
