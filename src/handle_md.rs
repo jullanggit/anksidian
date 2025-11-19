@@ -354,7 +354,7 @@ fn code_to_string(code: Code) -> String {
 
 fn accent_to_string<Delim: TParse>(value: &Accent<Delim>, html_tag: &str) -> String {
     format!(
-        "<{html_tag}>{}{}{}<\\{html_tag}>",
+        "<{html_tag}>{}{}{}</{html_tag}>",
         value.2,
         value.3.0.iter().map(|(_, char)| char).collect::<String>(),
         value.5
