@@ -29,8 +29,8 @@ type FileElement = Or<(
     Code,
     Math,
     Link,
-    Italic,
     Bold,
+    Italic,
     char,
 )>;
 type File = AllConsumed<Vec<FileElement>>;
@@ -39,7 +39,7 @@ type File = AllConsumed<Vec<FileElement>>;
 type Newline = Or<(TStr<"\r">, TStr<"\n">, TStr<"\r\n">)>;
 
 // heading
-type Element = Or<(Code, Math, Link, Italic, Bold, char)>;
+type Element = Or<(Code, Math, Link, Bold, Italic, char)>;
 type Heading = (
     VecN<1, TStr<"#">>,
     TStr<" ">,
@@ -378,10 +378,10 @@ fn element_to_string(
         Ok(link_to_string(*link, pictures))
     });
 
-    let matcher = AddMatcher::<3>::add_matcher(matcher, |italic, _| Ok(italic_to_string(*italic)));
-    let matcher = AddMatcher::<4>::add_matcher(matcher, |bold: Box<Bold>, _| {
+    let matcher = AddMatcher::<3>::add_matcher(matcher, |bold: Box<Bold>, _| {
         Ok(accent_to_string(&bold, "b"))
     });
+    let matcher = AddMatcher::<4>::add_matcher(matcher, |italic, _| Ok(italic_to_string(*italic)));
     let matcher = matcher.add_matcher(|char, _| Ok(char.to_string()));
     matcher.do_match()
 }
