@@ -1,6 +1,6 @@
 # Thermal expansion
 ## Definition
-- Change of ==[[volume|Volume]]/length== in response to ==change of
+- _Change_ of ==[[volume|Volume]]/length== in **response** to ==change of
 [[temperature]]
 ![[image.jxl]]==
 ## Formula

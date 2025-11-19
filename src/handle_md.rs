@@ -22,14 +22,24 @@ use tparse::*;
 // grammar
 
 // file
-type FileElement = Or<(ClozeLines, Heading, Tag, Code, Math, Link, char)>;
+type FileElement = Or<(
+    ClozeLines,
+    Heading,
+    Tag,
+    Code,
+    Math,
+    Link,
+    Italic,
+    Bold,
+    char,
+)>;
 type File = AllConsumed<Vec<FileElement>>;
 
 // newline
 type Newline = Or<(TStr<"\r">, TStr<"\n">, TStr<"\r\n">)>;
 
 // heading
-type Element = Or<(Code, Math, Link, char)>;
+type Element = Or<(Code, Math, Link, Italic, Bold, char)>;
 type Heading = (
     VecN<1, TStr<"#">>,
     TStr<" ">,
@@ -69,23 +79,21 @@ type NoteIdComment = (
     Option<Newline>,
 );
 
+type DelimitedChars<Delim> = (Delim, VecN<1, (IsNot<Delim>, char)>, Delim);
+
 // code
 type Code = Or<(InlineCode, MultilineCode)>;
 // inline code
-type InlineCode = (TStr<"`">, VecN<1, (IsNot<TStr<"`">>, char)>, TStr<"`">);
+type InlineCode = DelimitedChars<TStr<"`">>;
 // display code
-type MultilineCode = (
-    TStr<"```">,
-    VecN<1, (IsNot<TStr<"```">>, char)>,
-    TStr<"```">,
-);
+type MultilineCode = DelimitedChars<TStr<"```">>;
 
 // math
 type Math = Or<(InlineMath, DisplayMath)>;
 // inline math
-type InlineMath = (TStr<"$">, VecN<1, (IsNot<TStr<"$">>, char)>, TStr<"$">);
+type InlineMath = DelimitedChars<TStr<"$">>;
 // display math
-type DisplayMath = (TStr<"$$">, VecN<1, (IsNot<TStr<"$$">>, char)>, TStr<"$$">);
+type DisplayMath = DelimitedChars<TStr<"$$">>;
 
 // Link
 type LinkRenameSeparator = TStr<"|">;
@@ -102,6 +110,18 @@ type LinkRename = (
     LinkRenameSeparator,
     VecN<1, (IsNot<Or<(TStr<"]]">, Newline)>>, char)>,
 );
+
+type Accent<Delim> = (
+    Delim,
+    IsNot<TStr<" ">>,
+    char,
+    VecN<1, (IsNot<Delim>, char)>,
+    IsNot<TStr<" ">>,
+    char,
+    Delim,
+);
+type Italic = Or<(Accent<TStr<"*">>, Accent<TStr<"_">>)>;
+type Bold = Accent<TStr<"**">>;
 
 pub struct ClozeData {
     pub contents: String,
@@ -183,6 +203,8 @@ pub fn handle_md(path: &Path) -> Result<(), HandleMdError> {
         let matcher = AddMatcher::<4>::add_matcher(matcher, |_, _| Ok(()));
         let matcher = AddMatcher::<5>::add_matcher(matcher, |_, _| Ok(()));
         let matcher = AddMatcher::<6>::add_matcher(matcher, |_, _| Ok(()));
+        let matcher = AddMatcher::<7>::add_matcher(matcher, |_, _| Ok(()));
+        let matcher = AddMatcher::<8>::add_matcher(matcher, |_, _| Ok(()));
         matcher.do_match()?;
     }
 
@@ -330,6 +352,21 @@ fn code_to_string(code: Code) -> String {
     matcher.do_match()
 }
 
+fn accent_to_string<Delim: TParse>(value: &Accent<Delim>, html_tag: &str) -> String {
+    format!(
+        "<{html_tag}>{}{}{}<\\{html_tag}>",
+        value.2,
+        value.3.0.iter().map(|(_, char)| char).collect::<String>(),
+        value.5
+    )
+}
+fn italic_to_string(italic: Italic) -> String {
+    let matcher = italic.matcher(());
+    let matcher = AddMatcher::<0>::add_matcher(matcher, |i, _| accent_to_string(&i, "i"));
+    let matcher = matcher.add_matcher(|i, _| accent_to_string(&i, "i"));
+    matcher.do_match()
+}
+
 fn element_to_string(
     element: Element,
     pictures: &mut Vec<Picture>,
@@ -339,6 +376,11 @@ fn element_to_string(
     let matcher = AddMatcher::<1>::add_matcher(matcher, |math, _| convert_math(*math));
     let matcher = AddMatcher::<2>::add_matcher(matcher, |link, pictures| {
         Ok(link_to_string(*link, pictures))
+    });
+
+    let matcher = AddMatcher::<3>::add_matcher(matcher, |italic, _| Ok(italic_to_string(*italic)));
+    let matcher = AddMatcher::<4>::add_matcher(matcher, |bold: Box<Bold>, _| {
+        Ok(accent_to_string(&bold, "b"))
     });
     let matcher = matcher.add_matcher(|char, _| Ok(char.to_string()));
     matcher.do_match()
@@ -503,15 +545,15 @@ pub enum MathConvertError {
 /// Convert from Obsidian latex/typst to anki latex
 fn convert_math(math: Math) -> Result<String, MathConvertError> {
     // extract inner math
-    fn extract<T, U, V>(math: &(T, VecN<1, (U, char)>, V)) -> String {
+    fn extract<Delim: TParse>(math: &DelimitedChars<Delim>) -> String {
         math.1.0.iter().map(|char| char.1).collect()
     }
     let matcher = math.matcher(());
-    let matcher = AddMatcher::<0>::add_matcher(matcher, |inner, _| {
+    let matcher = AddMatcher::<0>::add_matcher(matcher, |inner: Box<InlineMath>, _| {
         let inner = extract(&inner);
         (format!("${inner}$"), format!("\\({inner}\\)"))
     });
-    let matcher = matcher.add_matcher(|inner, _| {
+    let matcher = matcher.add_matcher(|inner: Box<DisplayMath>, _| {
         let inner = extract(&inner);
         (format!("$ {inner} $"), format!("\\[{inner}\\]"))
     });
@@ -649,6 +691,8 @@ pub fn mark_notes_as_seen(file: &Path) -> Result<(), MarkNotesAsSeenError> {
         let matcher = AddMatcher::<4>::add_matcher(matcher, |_, _| Ok(()));
         let matcher = AddMatcher::<5>::add_matcher(matcher, |_, _| Ok(()));
         let matcher = AddMatcher::<6>::add_matcher(matcher, |_, _| Ok(()));
+        let matcher = AddMatcher::<7>::add_matcher(matcher, |_, _| Ok(()));
+        let matcher = AddMatcher::<8>::add_matcher(matcher, |_, _| Ok(()));
         matcher.do_match()?;
     }
 
