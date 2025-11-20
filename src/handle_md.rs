@@ -115,9 +115,8 @@ type Accent<Delim> = (
     Delim,
     IsNot<TStr<" ">>,
     char,
-    VecN<1, (IsNot<Delim>, char)>,
-    IsNot<TStr<" ">>,
-    char,
+    Vec<(IsNot<Delim>, char)>,
+    // TODO: actually check that last character isn't a space
     Delim,
 );
 type Italic = Or<(Accent<TStr<"*">>, Accent<TStr<"_">>)>;
@@ -354,10 +353,9 @@ fn code_to_string(code: Code) -> String {
 
 fn accent_to_string<Delim: TParse>(value: &Accent<Delim>, html_tag: &str) -> String {
     format!(
-        "<{html_tag}>{}{}{}</{html_tag}>",
+        "<{html_tag}>{}{}</{html_tag}>",
         value.2,
-        value.3.0.iter().map(|(_, char)| char).collect::<String>(),
-        value.5
+        value.3.iter().map(|(_, char)| char).collect::<String>(),
     )
 }
 fn italic_to_string(italic: Italic) -> String {
