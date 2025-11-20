@@ -65,7 +65,6 @@ It currently contains two config values:
 
 ## TODO
 
-- italics & bold
 - tables
 - choose where images are shown
 - fix off-by-one somewhere in the heading logic
