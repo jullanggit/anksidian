@@ -38,6 +38,8 @@ struct Config {
     #[serde(with = "serde_regex")]
     ignore_paths: Vec<Regex>,
     disable_typst: bool,
+    use_tags: bool,
+    tag_to_deck: Vec<TagToDeck>,
 }
 impl Default for Config {
     fn default() -> Self {
@@ -48,12 +50,23 @@ impl Default for Config {
             }],
             ignore_paths: vec![Regex::new(".*Excalidraw").expect("Should be a valid regex")],
             disable_typst: false,
+            use_tags: false,
+            tag_to_deck: vec![TagToDeck {
+                tag: "anki".to_string(),
+                deck: "Defailt".to_string(),
+            }]
         }
     }
 }
 #[test]
 fn test_default_config() {
     Config::default();
+}
+
+#[derive(Deserialize, Serialize, Clone)]
+struct TagToDeck {
+    tag: String,
+    deck: String,
 }
 
 #[derive(Deserialize, Serialize, Clone)]
@@ -92,9 +105,15 @@ static CONFIG: LazyLock<Config> = LazyLock::new(|| {
     };
 
     // ensure all decks mentioned in config exist
-    for PathToDeck { deck, .. } in &config.path_to_deck {
-        anki::ensure_deck_exists(deck).expect("Failed to ensure that deck exists")
-    }
+    if config.use_tags {
+        for TagToDeck { deck, .. } in &config.tag_to_deck {
+            anki::ensure_deck_exists(deck).expect("Failed to ensure tha deck exists")
+        }
+    } else {
+        for PathToDeck { deck, .. } in &config.path_to_deck {
+            anki::ensure_deck_exists(deck).expect("Failed to ensure that deck exists")
+        }
+    }    
 
     config
 });
