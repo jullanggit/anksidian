@@ -56,8 +56,13 @@ It currently contains two config values:
 - path_to_deck:
   - a mapping of paths (or regexes) to anki decks, that anksidian should use
   - is evaluated in the order specifified in the config
-- disable_typst
+- disable_typst:
   - is a bool to disable typst to latex conversion
+- use_tags:
+  - is a bool to disable paths and instead use tags
+- tag_to_deck:
+  - a mapping of tags to anki decks, that anksidian should use
+  - is evaluated in the order specifified in the config
 
 ## Example
 
