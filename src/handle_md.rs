@@ -265,8 +265,12 @@ pub fn handle_md(path: &Path) -> Result<(), HandleMdError> {
                     .find(|mapping| mapping.path.is_match(&canonicalized.to_string_lossy()))
                     .ok_or_else(|| HandleMdError::DeckLookup(path.to_path_buf()))?
                     .deck;
-
-                let deck = deck_path.or(deck_tag);
+                
+                let deck = if !deck_path.is_empty() {
+                    deck_path
+                } else {
+                    deck_tag
+                };
 
                 match add_cloze_note(cloze, tags.iter().map(ToString::to_string).collect(), deck) {
                     Ok(note_id) => Some(note_id),
