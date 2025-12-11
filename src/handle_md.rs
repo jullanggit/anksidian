@@ -252,21 +252,21 @@ pub fn handle_md(path: &Path) -> Result<(), HandleMdError> {
                             error,
                         })?;
 
-                let deck = if CONFIG.use_tags {
-                    &CONFIG
-                        .tag_to_deck
-                        .iter()
-                        .find(|tag| tags.contains(&tag.tag))
-                        .ok_or_else(|| HandleMdError::DeckLookup(path.to_path_buf()))?
-                        .deck
-                } else {
-                    &CONFIG
-                        .path_to_deck
-                        .iter()
-                        .find(|mapping| mapping.path.is_match(&canonicalized.to_string_lossy()))
-                        .ok_or_else(|| HandleMdError::DeckLookup(path.to_path_buf()))?
-                        .deck
-                };
+                let deck_tag = &CONFIG
+                    .tag_to_deck
+                    .iter()
+                    .find(|tag| tags.contains(&tag.tag))
+                    .ok_or_else(|| HandleMdError::DeckLookup(path.to_path_buf()))?
+                    .deck;
+
+                let deck_path = &CONFIG
+                    .path_to_deck
+                    .iter()
+                    .find(|mapping| mapping.path.is_match(&canonicalized.to_string_lossy()))
+                    .ok_or_else(|| HandleMdError::DeckLookup(path.to_path_buf()))?
+                    .deck;
+
+                let deck = deck_path.or(deck_tag);
 
                 match add_cloze_note(cloze, tags.iter().map(ToString::to_string).collect(), deck) {
                     Ok(note_id) => Some(note_id),
