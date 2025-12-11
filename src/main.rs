@@ -35,10 +35,10 @@ mod handle_md;
 #[derive(Deserialize, Serialize, Clone)]
 struct Config {
     path_to_deck: Vec<PathToDeck>,
+    tag_to_deck: Vec<TagToDeck>,
     #[serde(with = "serde_regex")]
     ignore_paths: Vec<Regex>,
     disable_typst: bool,
-    tag_to_deck: Vec<TagToDeck>,
 }
 impl Default for Config {
     fn default() -> Self {
@@ -59,15 +59,15 @@ fn test_default_config() {
 }
 
 #[derive(Deserialize, Serialize, Clone)]
-struct TagToDeck {
-    tag: String,
+struct PathToDeck {
+    #[serde(with = "serde_regex")]
+    path: Regex,
     deck: String,
 }
 
 #[derive(Deserialize, Serialize, Clone)]
-struct PathToDeck {
-    #[serde(with = "serde_regex")]
-    path: Regex,
+struct TagToDeck {
+    tag: String,
     deck: String,
 }
 
@@ -100,10 +100,12 @@ static CONFIG: LazyLock<Config> = LazyLock::new(|| {
     };
 
     // ensure all decks mentioned in config exist
-    for TagToDeck { deck, .. } in &config.tag_to_deck {
-        anki::ensure_deck_exists(deck).expect("Failed to ensure tha deck exists")
-    }
-    for PathToDeck { deck, .. } in &config.path_to_deck {
+    for deck in config
+        .path_to_deck
+        .iter()
+        .map(|mapping| &mapping.deck)
+        .chain(config.tag_to_deck.iter().map(|mapping| &mapping.deck))
+    {
         anki::ensure_deck_exists(deck).expect("Failed to ensure that deck exists")
     }
 
