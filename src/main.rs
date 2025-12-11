@@ -51,10 +51,7 @@ impl Default for Config {
             ignore_paths: vec![Regex::new(".*Excalidraw").expect("Should be a valid regex")],
             disable_typst: false,
             use_tags: false,
-            tag_to_deck: vec![TagToDeck {
-                tag: "anki".to_string(),
-                deck: "Defailt".to_string(),
-            }]
+            tag_to_deck: vec![],
         }
     }
 }
