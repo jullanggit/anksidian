@@ -1,6 +1,6 @@
 use crate::{
-    anki::{add_cloze_note, update_cloze_note, LockNotesError, NoteId, NOTES},
-    FileCache, CONFIG,
+    CONFIG, FileCache,
+    anki::{LockNotesError, NOTES, NoteId, add_cloze_note, update_cloze_note},
 };
 use log::{error, warn};
 use serde::Serialize;
@@ -252,22 +252,20 @@ pub fn handle_md(path: &Path) -> Result<(), HandleMdError> {
                             error,
                         })?;
 
-
-                let deck_path = &CONFIG
+                let deck = CONFIG
                     .path_to_deck
                     .iter()
-                    .find(|mapping| mapping.path.is_match(&canonicalized.to_string_lossy()));
-
-                let deck = if let Some(deck) = deck_path {
-                    &deck.deck
-                } else {
-                    &CONFIG
-                    .tag_to_deck
-                    .iter()
-                    .find(|tag| tags.contains(&tag.tag))
-                    .ok_or_else(|| HandleMdError::DeckLookup(path.to_path_buf()))?
-                    .deck
-                };
+                    .find_map(|mapping| {
+                        mapping
+                            .path
+                            .is_match(&canonicalized.to_string_lossy())
+                            .then_some(&mapping.deck)
+                    })
+                    .or(CONFIG
+                        .tag_to_deck
+                        .iter()
+                        .find_map(|mapping| tags.contains(&mapping.tag).then_some(&mapping.deck)))
+                    .ok_or_else(|| HandleMdError::DeckLookup(path.to_path_buf()))?;
 
                 match add_cloze_note(cloze, tags.iter().map(ToString::to_string).collect(), deck) {
                     Ok(note_id) => Some(note_id),
