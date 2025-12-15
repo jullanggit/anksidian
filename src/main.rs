@@ -1,5 +1,4 @@
 #![feature(exit_status_error)]
-#![feature(array_windows)]
 #![feature(string_into_chars)]
 #![feature(iter_intersperse)]
 #![feature(iter_map_windows)]
