@@ -1,6 +1,6 @@
 use crate::{
-    CONFIG, FileCache,
-    anki::{LockNotesError, NOTES, NoteId, add_cloze_note, update_cloze_note},
+    anki::{add_cloze_note, update_cloze_note, LockNotesError, NoteId, NOTES},
+    FileCache, CONFIG,
 };
 use log::{error, warn};
 use serde::Serialize;
@@ -531,10 +531,13 @@ fn maybe_handle_image(path: &Path, pictures: &mut Vec<Picture>) -> Option<()> {
 
                 (
                     out_path.canonicalize().ok()?,
-                    filename.to_str()?.to_string(),
+                    filename.file_name()?.to_str()?.to_string(),
                 )
             } else {
-                (path.canonicalize().ok()?, path.to_str()?.to_string())
+                (
+                    path.canonicalize().ok()?,
+                    path.file_name()?.to_str()?.to_string(),
+                )
             };
             pictures.push(Picture::new(path, filename));
             return Some(());
