@@ -1,6 +1,6 @@
 use crate::{
-    CONFIG, FileCache,
-    anki::{LockNotesError, NOTES, NoteId, add_cloze_note, update_cloze_note},
+    anki::{add_cloze_note, update_cloze_note, LockNotesError, NoteId, NOTES},
+    FileCache, CONFIG,
 };
 use log::{error, warn};
 use serde::Serialize;
@@ -167,7 +167,7 @@ pub fn handle_md(path: &Path) -> Result<(), HandleMdError> {
     let mut headings: Vec<String> = Vec::new();
     let mut clozes: Vec<ClozeData> = Vec::new();
 
-    for file_element in parsed.0.0 {
+    for file_element in parsed.0 .0 {
         let matcher: Matcher<_, _, _, _> = file_element.matcher::<_, Result<(), HandleMdError>>((
             &mut headings,
             &mut clozes,
@@ -194,7 +194,7 @@ pub fn handle_md(path: &Path) -> Result<(), HandleMdError> {
                 tag.0
                     .str()
                     .chars()
-                    .chain(tag.1.0.into_iter().map(|char| char.1))
+                    .chain(tag.1 .0.into_iter().map(|char| char.1))
                     .collect::<String>(),
             ))
         });
@@ -316,7 +316,7 @@ fn handle_heading(
     headings: &mut Vec<String>,
     pictures: &mut Vec<Picture>,
 ) -> Result<(), MathConvertError> {
-    let level = heading.0.0.len();
+    let level = heading.0 .0.len();
     let mut contents = String::new();
     for (_, element) in heading.2 {
         contents.push_str(&element_to_string(element, pictures)?);
@@ -346,7 +346,7 @@ fn code_to_string(code: Code) -> String {
         format!(
             "{}{}{}",
             code.0.str(),
-            code.1.0.iter().map(|char| char.1).collect::<String>(),
+            code.1 .0.iter().map(|char| char.1).collect::<String>(),
             code.2.str()
         )
     });
@@ -354,7 +354,7 @@ fn code_to_string(code: Code) -> String {
         format!(
             "{}{}{}",
             code.0.str(),
-            code.1.0.iter().map(|char| char.1).collect::<String>(),
+            code.1 .0.iter().map(|char| char.1).collect::<String>(),
             code.2.str()
         )
     });
@@ -418,7 +418,7 @@ fn handle_cloze_lines(
         *cloze_num += 1;
 
         write!(string, "{{{{c{cloze_num}::").expect("Writing to string shouldn't fail");
-        for (_, element) in cloze.1.0 {
+        for (_, element) in cloze.1 .0 {
             string.push_str(&element_to_string(element, pictures)?);
         }
         string.push_str("}}");
@@ -451,7 +451,7 @@ fn handle_cloze_lines(
         }
     }
 
-    let remaining_length = cloze_lines.4.0;
+    let remaining_length = cloze_lines.4 .0;
 
     clozes.push(ClozeData {
         contents: string,
@@ -531,7 +531,7 @@ fn maybe_handle_image(path: &Path, pictures: &mut Vec<Picture>) -> Option<()> {
 
                 (
                     out_path.canonicalize().ok()?,
-                    filename.to_str()?.to_string(),
+                    filename.file_name()?.to_str()?.to_string(),
                 )
             } else {
                 (path.canonicalize().ok()?, path.to_str()?.to_string())
@@ -554,7 +554,7 @@ pub enum MathConvertError {
 fn convert_math(math: Math) -> Result<String, MathConvertError> {
     // extract inner math
     fn extract<Delim: TParse>(math: &DelimitedChars<Delim>) -> String {
-        math.1.0.iter().map(|char| char.1).collect()
+        math.1 .0.iter().map(|char| char.1).collect()
     }
     let matcher = math.matcher(());
     let matcher = AddMatcher::<0>::add_matcher(matcher, |inner: Box<InlineMath>, _| {
@@ -663,7 +663,7 @@ pub fn mark_notes_as_seen(file: &Path) -> Result<(), MarkNotesAsSeenError> {
     let parsed = File::tparse(&str)
         .expect("Parsing file can't fail, as it includes a Vec<char> option, that always matches");
 
-    for file_element in parsed.0.0 {
+    for file_element in parsed.0 .0 {
         let matcher: Matcher<_, _, _, _> =
             file_element.matcher::<_, Result<(), MarkNotesAsSeenError>>(());
         let matcher = AddMatcher::<0>::add_matcher(matcher, |cloze_lines, _| {
@@ -708,7 +708,7 @@ pub fn mark_notes_as_seen(file: &Path) -> Result<(), MarkNotesAsSeenError> {
 }
 
 fn extract_note_id(note_id_comment: NoteIdComment) -> NoteId {
-    NoteId(note_id_comment.2.0.into_iter().fold(0u64, |acc, digit| {
+    NoteId(note_id_comment.2 .0.into_iter().fold(0u64, |acc, digit| {
         acc * 10
             + digit
                 .0
