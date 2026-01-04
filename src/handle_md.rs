@@ -534,7 +534,10 @@ fn maybe_handle_image(path: &Path, pictures: &mut Vec<Picture>) -> Option<()> {
                     filename.file_name()?.to_str()?.to_string(),
                 )
             } else {
-                (path.canonicalize().ok()?, path.to_str()?.to_string())
+                (
+                    path.canonicalize().ok()?,
+                    path.file_name()?.to_str()?.to_string(),
+                )
             };
             pictures.push(Picture::new(path, filename));
             return Some(());
