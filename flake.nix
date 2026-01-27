@@ -27,7 +27,7 @@
           overlays = [ rust-overlay.overlays.default ];
         };
 
-        rustToolchain = pkgs.rust-bin.stable.latest.default;
+        rustToolchain = pkgs.rust-bin.nightly.latest.default.override { extensions = [ "rust-src" ]; };
       in
       {
         devShells.default = pkgs.mkShell {
