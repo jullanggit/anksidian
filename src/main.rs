@@ -12,7 +12,7 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
-    env::{self, VarError, home_dir},
+    env::{self, VarError},
     fmt::Display,
     fs::{self, File, OpenOptions},
     io::{self, BufWriter, Read},
@@ -72,9 +72,9 @@ struct TagToDeck {
 }
 
 static CONFIG: LazyLock<Config> = LazyLock::new(|| {
-    let path = home_dir()
-        .expect("Failed to get home directory")
-        .join(".config/anksidian/config.json");
+    let path = dirs::config_dir()
+        .expect("Failed to get config directory")
+        .join("anksidian/config.json");
 
     let config = if !fs::exists(&path).expect("Failed to check if folder to deck config exists") {
         if let Err(err) = fs::create_dir_all(
@@ -180,8 +180,8 @@ fn main() {
 
 #[derive(Error, Debug)]
 enum FileCacheLoadError {
-    #[error("Failed to get path to file cache: {0}")]
-    GetPath(#[from] VarError),
+    #[error("Failed to get path to file cache")]
+    GetPath,
     #[error("Failed to open file cache: {0}")]
     Open(#[from] std::io::Error),
     #[error("Failed to deserialize file cache: {0}")]
@@ -190,8 +190,8 @@ enum FileCacheLoadError {
 
 #[derive(Error, Debug)]
 enum FileCacheSaveError {
-    #[error("Failed to get path to file cache: {0}")]
-    GetPath(#[from] VarError),
+    #[error("Failed to get path to file cache")]
+    GetPath,
     #[error("Failed to create parent paths for the file cache: {0}")]
     CreateParents(std::io::Error),
     #[error("Failed to open file cache: {0}")]
@@ -206,20 +206,11 @@ struct FileCache {
     hashes: HashMap<PathBuf, HashMap<PathBuf, Hash>>,
 }
 impl FileCache {
-    fn get_path() -> Result<PathBuf, VarError> {
-        let mut cache = PathBuf::from(env::var("XDG_CACHE_HOME").or_else(|_| {
-            env::var("HOME").map(|mut home| {
-                home.push_str("/.cache");
-                home
-            })
-        })?);
-        cache.push("anksidian");
-        cache.push("file_cache.json");
-
-        Ok(cache)
+    fn get_path() -> Option<PathBuf> {
+        Some(dirs::cache_dir()?.join("anksidian/file_cache.json"))
     }
     fn load() -> Result<Self, FileCacheLoadError> {
-        let path = Self::get_path()?;
+        let path = Self::get_path().ok_or(FileCacheLoadError::GetPath)?;
         if !path.exists() {
             Ok(Self::default())
         } else {
@@ -228,7 +219,7 @@ impl FileCache {
         }
     }
     fn save(&self) -> Result<(), FileCacheSaveError> {
-        let path = Self::get_path()?;
+        let path = Self::get_path().ok_or(FileCacheSaveError::GetPath)?;
         let parent = path.parent().expect("Path should have a parent");
         if !parent.exists() {
             fs::create_dir_all(parent).map_err(FileCacheSaveError::CreateParents)?;
