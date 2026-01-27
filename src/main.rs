@@ -4,6 +4,7 @@
 #![feature(iter_map_windows)]
 #![feature(file_buffered)]
 #![feature(associated_type_defaults)]
+#![feature(result_option_map_or_default)]
 
 use blake3::{Hash, Hasher};
 use log::trace;
@@ -127,6 +128,19 @@ fn exit_on_err<T, E: Display>(res: Result<T, E>, msg: &str) -> T {
 
 fn main() {
     env_logger::init();
+
+    if env::args().skip(1).any(|arg| &arg == "--help") {
+        println!(
+            "Options:\n\
+            --track-seen: track whether notes were seen in unchanged files\n\
+            --no-cache: do not use the file cache {}\n\n\
+            Both `--track-seen` and `--no-cache` enable anksidian to detect when a note was deleted \
+            in your files, but not from Anki, and will ask to do so for you.",
+            FileCache::get_path()
+                .map_or_default(|path| format!("(located at {})", path.to_string_lossy()))
+        );
+        return;
+    }
 
     exit_on_err(initialize_notes(), "Failed to initialize notes");
 
