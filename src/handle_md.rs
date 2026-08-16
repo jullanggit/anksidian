@@ -211,7 +211,9 @@ pub fn handle_md(path: &Path) -> Result<(), HandleMdError> {
     let mut out_string =
         String::with_capacity(str.len() + clozes.len() * APPROX_LEN_NOTE_ID_COMMENT);
     for mut cloze in clozes {
-        let actual_note_id = NOTES
+        let in_file_note_id = cloze.note_id;
+
+        let anki_note_id = NOTES
             .lock()?
             .iter_mut()
             .find(|(note, _)| {
@@ -224,14 +226,13 @@ pub fn handle_md(path: &Path) -> Result<(), HandleMdError> {
                 } else {
                     *seen = true;
                 }
-                cloze.note_id = Some(note.id);
+                cloze.note_id = Some(note.id); // update for update_cloze_note()
                 note.id
             });
 
-        let note_id = cloze.note_id;
         let index = str.len() - cloze.remaining_length;
 
-        let final_id = match actual_note_id {
+        let final_id = match anki_note_id {
             // update existing note
             Some(note_id) => {
                 let result =
@@ -279,7 +280,7 @@ pub fn handle_md(path: &Path) -> Result<(), HandleMdError> {
 
         out_string.push_str(&str[last_read..index]);
         last_read = index;
-        match (note_id, final_id) {
+        match (in_file_note_id, final_id) {
             // dont change anything
             (_, None) => {}
             // write new id
