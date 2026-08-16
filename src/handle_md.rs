@@ -330,24 +330,26 @@ fn handle_heading(
 }
 
 fn code_to_string(code: Code) -> String {
-    let matcher = code.matcher::<(), String>(());
-    let matcher = AddMatcher::<0>::add_matcher(matcher, |code, _| {
-        format!(
-            "{}{}{}",
-            code.0.str(),
-            code.1.0.iter().map(|char| char.1).collect::<String>(),
-            code.2.str()
-        )
-    });
-    let matcher = matcher.add_matcher(|code, _| {
-        format!(
-            "{}{}{}",
-            code.0.str(),
-            code.1.0.iter().map(|char| char.1).collect::<String>(),
-            code.2.str()
-        )
-    });
-    matcher.do_match()
+    matcher!(
+        code,
+        () -> _,
+        0: |code, _| {
+            format!(
+                "{}{}{}",
+                code.0.str(),
+                code.1.0.iter().map(|char| char.1).collect::<String>(),
+                code.2.str()
+            )
+        }
+        1: |code, _| {
+            format!(
+                "{}{}{}",
+                code.0.str(),
+                code.1.0.iter().map(|char| char.1).collect::<String>(),
+                code.2.str()
+            )
+        }
+    )
 }
 
 fn accent_to_string<Delim: TParse>(value: &Accent<Delim>, html_tag: &str) -> String {
@@ -358,29 +360,32 @@ fn accent_to_string<Delim: TParse>(value: &Accent<Delim>, html_tag: &str) -> Str
     )
 }
 fn italic_to_string(italic: Italic) -> String {
-    let matcher = italic.matcher(());
-    let matcher = AddMatcher::<0>::add_matcher(matcher, |i, _| accent_to_string(&i, "i"));
-    let matcher = matcher.add_matcher(|i, _| accent_to_string(&i, "i"));
-    matcher.do_match()
+    matcher!(
+        italic,
+        () -> _,
+        0: |i, _| accent_to_string(&i, "i")
+        1: |i, _| accent_to_string(&i, "i")
+    )
 }
 
 fn element_to_string(
     element: Element,
     pictures: &mut Vec<Picture>,
 ) -> Result<String, MathConvertError> {
-    let matcher = element.matcher(pictures);
-    let matcher = AddMatcher::<0>::add_matcher(matcher, |code, _| Ok(code_to_string(*code)));
-    let matcher = AddMatcher::<1>::add_matcher(matcher, |math, _| convert_math(*math));
-    let matcher = AddMatcher::<2>::add_matcher(matcher, |link, pictures| {
-        Ok(link_to_string(*link, pictures))
-    });
-
-    let matcher = AddMatcher::<3>::add_matcher(matcher, |bold: Box<Bold>, _| {
-        Ok(accent_to_string(&bold, "b"))
-    });
-    let matcher = AddMatcher::<4>::add_matcher(matcher, |italic, _| Ok(italic_to_string(*italic)));
-    let matcher = matcher.add_matcher(|char, _| Ok(char.to_string()));
-    matcher.do_match()
+    matcher!(
+        element,
+        pictures -> _,
+        0: |code, _| Ok(code_to_string(*code))
+        1: |math, _| convert_math(*math)
+        2: |link, pictures| {
+            Ok(link_to_string(*link, pictures))
+        }
+        3: |bold: Box<Bold>, _| {
+            Ok(accent_to_string(&bold, "b"))
+        }
+        4: |italic, _| Ok(italic_to_string(*italic))
+        5: |char, _| Ok(char.to_string())
+    )
 }
 
 fn handle_cloze_lines(
@@ -416,16 +421,17 @@ fn handle_cloze_lines(
     add_cloze(cloze_lines.1, &mut string, &mut cloze_num, &mut pictures)?;
 
     for element_or_cloze in cloze_lines.2 {
-        let matcher = element_or_cloze.matcher((&mut string, &mut pictures, &mut cloze_num));
-        let matcher =
-            AddMatcher::<0>::add_matcher(matcher, |cloze, (string, pictures, cloze_num)| {
+        matcher!(
+            element_or_cloze,
+            (&mut string, &mut pictures, &mut cloze_num) -> _,
+            0: |cloze, (string, pictures, cloze_num)| {
                 add_cloze(*cloze, string, cloze_num, pictures)
-            });
-        let matcher = matcher.add_matcher(|element, (string, pictures, _)| {
-            #[expect(clippy::unit_arg)]
-            Ok(string.push_str(&element_to_string(element.1, pictures)?))
-        });
-        matcher.do_match()?;
+            }
+            1: |element, (string, pictures, _)| {
+                #[expect(clippy::unit_arg)]
+                Ok(string.push_str(&element_to_string(element.1, pictures)?))
+            }
+        )?;
     }
     if let Some(note_id_comment) = cloze_lines.3 {
         note_id = Some(extract_note_id(note_id_comment));
@@ -548,16 +554,18 @@ fn convert_math(math: Math) -> Result<String, MathConvertError> {
     fn extract<Delim: TParse>(math: &DelimitedChars<Delim>) -> String {
         math.1.0.iter().map(|char| char.1).collect()
     }
-    let matcher = math.matcher(());
-    let matcher = AddMatcher::<0>::add_matcher(matcher, |inner: Box<InlineMath>, _| {
-        let inner = extract(&inner);
-        (format!("${inner}$"), format!("\\({inner}\\)"))
-    });
-    let matcher = matcher.add_matcher(|inner: Box<DisplayMath>, _| {
-        let inner = extract(&inner);
-        (format!("$ {inner} $"), format!("\\[{inner}\\]"))
-    });
-    let (typst_style_math, latex_style_math) = matcher.do_match();
+    let (typst_style_math, latex_style_math) = matcher!(
+        math,
+        () -> _,
+        0: |inner: Box<InlineMath>, _| {
+            let inner = extract(&inner);
+            (format!("${inner}$"), format!("\\({inner}\\)"))
+        }
+        1: |inner: Box<DisplayMath>, _| {
+            let inner = extract(&inner);
+            (format!("$ {inner} $"), format!("\\[{inner}\\]"))
+        }
+    );
 
     Ok(if is_typst(&typst_style_math)? && !CONFIG.disable_typst {
         typst_to_latex(&typst_style_math)?
@@ -656,44 +664,45 @@ pub fn mark_notes_as_seen(file: &Path) -> Result<(), MarkNotesAsSeenError> {
         .expect("Parsing file can't fail, as it includes a Vec<char> option, that always matches");
 
     for file_element in parsed.0.0 {
-        let matcher: Matcher<_, _, _, _> =
-            file_element.matcher::<_, Result<(), MarkNotesAsSeenError>>(());
-        let matcher = AddMatcher::<0>::add_matcher(matcher, |cloze_lines, _| {
-            if let Some(note_id) = cloze_lines.3 {
-                let note_id = extract_note_id(note_id);
-                let mut lock = NOTES.lock()?;
-                let note = lock.iter_mut().find(|(note, _)| note.id == note_id);
+        matcher!(
+            file_element,
+            () -> Result<(), MarkNotesAsSeenError>,
+            0: |cloze_lines, _| {
+                if let Some(note_id) = cloze_lines.3 {
+                    let note_id = extract_note_id(note_id);
+                    let mut lock = NOTES.lock()?;
+                    let note = lock.iter_mut().find(|(note, _)| note.id == note_id);
 
-                match note {
-                    Some((note, seen)) => {
-                        if *seen {
-                            warn!("Note found more than once: {:?}", note);
-                        } else {
-                            *seen = true;
+                    match note {
+                        Some((note, seen)) => {
+                            if *seen {
+                                warn!("Note found more than once: {:?}", note);
+                            } else {
+                                *seen = true;
+                            }
+                        }
+                        None => {
+                            warn!(
+                                "Note not present in Anki found in unchanged file, not updating.\nTo update, modify the file or remove the file cache at {}",
+                                FileCache::get_path().map_or(
+                                    String::from("~/.cache/anksidian/file_cache.json"),
+                                    |path| path.to_string_lossy().to_string()
+                                )
+                            )
                         }
                     }
-                    None => {
-                        warn!(
-                            "Note not present in Anki found in unchanged file, not updating.\nTo update, modify the file or remove the file cache at {}",
-                            FileCache::get_path().map_or(
-                                String::from("~/.cache/anksidian/file_cache.json"),
-                                |path| path.to_string_lossy().to_string()
-                            )
-                        )
-                    }
                 }
+                Ok(())
             }
-            Ok(())
-        });
-        let matcher = AddMatcher::<1>::add_matcher(matcher, |_, _| Ok(()));
-        let matcher = AddMatcher::<2>::add_matcher(matcher, |_, _| Ok(()));
-        let matcher = AddMatcher::<3>::add_matcher(matcher, |_, _| Ok(()));
-        let matcher = AddMatcher::<4>::add_matcher(matcher, |_, _| Ok(()));
-        let matcher = AddMatcher::<5>::add_matcher(matcher, |_, _| Ok(()));
-        let matcher = AddMatcher::<6>::add_matcher(matcher, |_, _| Ok(()));
-        let matcher = AddMatcher::<7>::add_matcher(matcher, |_, _| Ok(()));
-        let matcher = AddMatcher::<8>::add_matcher(matcher, |_, _| Ok(()));
-        matcher.do_match()?;
+            1: |_, _| Ok(())
+            2: |_, _| Ok(())
+            3: |_, _| Ok(())
+            4: |_, _| Ok(())
+            5: |_, _| Ok(())
+            6: |_, _| Ok(())
+            7: |_, _| Ok(())
+            8: |_, _| Ok(())
+        )?;
     }
 
     Ok(())
