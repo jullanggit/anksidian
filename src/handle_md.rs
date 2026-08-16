@@ -168,43 +168,42 @@ pub fn handle_md(path: &Path) -> Result<(), HandleMdError> {
     let mut clozes: Vec<ClozeData> = Vec::new();
 
     for file_element in parsed.0.0 {
-        let matcher: Matcher<_, _, _, _> = file_element.matcher::<_, Result<(), HandleMdError>>((
-            &mut headings,
-            &mut clozes,
-            &path_str,
-            &mut tags,
-        ));
-        let matcher = AddMatcher::<0>::add_matcher(
-            matcher,
-            |cloze_lines, (headings, clozes, path_str, _)| {
+        matcher!(
+            file_element,
+            (
+                &mut headings,
+                &mut clozes,
+                &path_str,
+                &mut tags,
+            ) -> Result<(), HandleMdError>,
+            0: |cloze_lines, (headings, clozes, path_str, _)| {
                 Ok(handle_cloze_lines(
                     *cloze_lines,
                     headings,
                     clozes,
                     path_str,
                 )?)
-            },
-        );
-        let matcher = AddMatcher::<1>::add_matcher(matcher, |heading, (headings, _, _, _)| {
-            Ok(handle_heading(*heading, headings, &mut Vec::new())?)
-        });
-        let matcher = AddMatcher::<2>::add_matcher(matcher, |tag, (_, _, _, tags)| {
-            #[expect(clippy::unit_arg)]
-            Ok(tags.push(
-                tag.0
-                    .str()
-                    .chars()
-                    .chain(tag.1.0.into_iter().map(|char| char.1))
-                    .collect::<String>(),
-            ))
-        });
-        let matcher = AddMatcher::<3>::add_matcher(matcher, |_, _| Ok(()));
-        let matcher = AddMatcher::<4>::add_matcher(matcher, |_, _| Ok(()));
-        let matcher = AddMatcher::<5>::add_matcher(matcher, |_, _| Ok(()));
-        let matcher = AddMatcher::<6>::add_matcher(matcher, |_, _| Ok(()));
-        let matcher = AddMatcher::<7>::add_matcher(matcher, |_, _| Ok(()));
-        let matcher = AddMatcher::<8>::add_matcher(matcher, |_, _| Ok(()));
-        matcher.do_match()?;
+            }
+            1: |heading, (headings, _, _, _)| {
+                Ok(handle_heading(*heading, headings, &mut Vec::new())?)
+            }
+            2: |tag, (_, _, _, tags)| {
+                #[expect(clippy::unit_arg)]
+                Ok(tags.push(
+                    tag.0
+                        .str()
+                        .chars()
+                        .chain(tag.1.0.into_iter().map(|char| char.1))
+                        .collect::<String>(),
+                ))
+            }
+            3: |_, _| Ok(())
+            4: |_, _| Ok(())
+            5: |_, _| Ok(())
+            6: |_, _| Ok(())
+            7: |_, _| Ok(())
+            8: |_, _| Ok(())
+        )?;
     }
 
     let mut last_read = 0;
