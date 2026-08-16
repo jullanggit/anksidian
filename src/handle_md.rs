@@ -1,6 +1,6 @@
 use crate::{
-    anki::{add_cloze_note, update_cloze_note, LockNotesError, NoteId, NOTES},
-    FileCache, CONFIG,
+    CONFIG, FileCache,
+    anki::{LockNotesError, NOTES, NoteId, add_cloze_note, update_cloze_note},
 };
 use log::{error, warn};
 use serde::Serialize;
@@ -317,26 +317,15 @@ fn handle_heading(
     pictures: &mut Vec<Picture>,
 ) -> Result<(), MathConvertError> {
     let level = heading.0.0.len();
-    let mut contents = String::new();
-    for (_, element) in heading.2 {
-        contents.push_str(&element_to_string(element, pictures)?);
-    }
+    let contents: String = heading
+        .2
+        .into_iter()
+        .map(|(_, element)| element_to_string(element, pictures))
+        .try_collect()?;
 
-    match level.cmp(&headings.len()) {
-        Ordering::Less => {
-            headings.pop();
-            headings.truncate(level);
-            headings[level - 1] = contents
-        }
-        Ordering::Equal => headings[level - 1] = contents,
-        Ordering::Greater => {
-            // empty headings will be filtered out when writing path
-            for _ in 0..level - headings.len() {
-                headings.push(Default::default());
-            }
-            headings.push(contents);
-        }
-    }
+    headings.resize(level, Default::default());
+    headings[level - 1] = contents;
+
     Ok(())
 }
 

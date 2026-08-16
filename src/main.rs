@@ -5,6 +5,7 @@
 #![feature(file_buffered)]
 #![feature(associated_type_defaults)]
 #![feature(result_option_map_or_default)]
+#![feature(iterator_try_collect)]
 
 use blake3::{Hash, Hasher};
 use log::trace;
