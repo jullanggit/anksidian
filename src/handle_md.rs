@@ -28,6 +28,7 @@ type FileElement = Or<(
     Tag,
     Code,
     Math,
+    ImageAllClozes,
     Link,
     Bold,
     Italic,
@@ -111,6 +112,11 @@ type LinkRename = (
     VecN<1, (IsNot<Or<(TStr<"]]">, Newline)>>, char)>,
 );
 
+// a comment on its own line, followed by an image on the next line,
+// to be added to the back of all clozes in the file
+// (display links are asserted in the handler)
+type ImageAllClozes = (TStr<"<!--anksidian:image-all-clozes-->">, Newline, Link);
+
 type Accent<Delim> = (
     Delim,
     IsNot<TStr<" ">>,
@@ -142,6 +148,7 @@ pub enum HandleMdError {
     #[error("Failed to canonicalize (expand) path {path}: {error}")]
     CanonicalizePath { path: PathBuf, error: io::Error },
 }
+
 pub fn handle_md(path: &Path) -> Result<(), HandleMdError> {
     /// the approximate length of a note id comment in bytes.
     /// Right for the years 2001-2286
@@ -163,6 +170,8 @@ pub fn handle_md(path: &Path) -> Result<(), HandleMdError> {
         .collect::<String>();
     path_str.truncate(path_str.len() - 3); // remove .md
 
+    // images following a `<!--anksidian:image-all-clozes-->` comment, to be added to the back of every cloze
+    let mut all_cloze_images = Vec::new();
     let mut tags: Vec<String> = Vec::new();
     let mut headings: Vec<String> = Vec::new();
     let mut clozes: Vec<ClozeData> = Vec::new();
@@ -175,8 +184,9 @@ pub fn handle_md(path: &Path) -> Result<(), HandleMdError> {
                 &mut clozes,
                 &path_str,
                 &mut tags,
+                &mut all_cloze_images,
             ) -> Result<(), HandleMdError>,
-            0: |cloze_lines, (headings, clozes, path_str, _)| {
+            0: |cloze_lines, (headings, clozes, path_str, _, _)| {
                 Ok(handle_cloze_lines(
                     *cloze_lines,
                     headings,
@@ -184,10 +194,10 @@ pub fn handle_md(path: &Path) -> Result<(), HandleMdError> {
                     path_str,
                 )?)
             }
-            1: |heading, (headings, _, _, _)| {
+            1: |heading, (headings, _, _, _, _)| {
                 Ok(handle_heading(*heading, headings, &mut Vec::new())?)
             }
-            2: |tag, (_, _, _, tags)| {
+            2: |tag, (_, _, _, tags, _)| {
                 #[expect(clippy::unit_arg)]
                 Ok(tags.push(
                     tag.0
@@ -199,11 +209,20 @@ pub fn handle_md(path: &Path) -> Result<(), HandleMdError> {
             }
             3: |_, _| Ok(())
             4: |_, _| Ok(())
-            5: |_, _| Ok(())
+            5: |image_all_clozes, (_, _, _, _, all_cloze_images)| {
+                handle_image_all_clozes(*image_all_clozes, all_cloze_images);
+                Ok(())
+            }
             6: |_, _| Ok(())
             7: |_, _| Ok(())
             8: |_, _| Ok(())
+            9: |_, _| Ok(())
         )?;
+    }
+
+    // add the marked images to the back of all clozes in the file
+    for cloze in &mut clozes {
+        cloze.pictures.extend(all_cloze_images.iter().cloned());
     }
 
     let mut last_read = 0;
@@ -309,6 +328,17 @@ pub fn handle_md(path: &Path) -> Result<(), HandleMdError> {
         file: path.to_path_buf(),
         error,
     })
+}
+
+/// Handle a `<!--anksidian:image-all-clozes-->` comment followed by a link on the next line,
+/// adding the image to the back of all clozes in the file
+fn handle_image_all_clozes(image_all_clozes: ImageAllClozes, pictures: &mut Vec<Picture>) {
+    let (_, _, link) = image_all_clozes;
+    // only displayed links are images
+    if link.0.is_some() {
+        // link_to_string adds a Picture for displayed image links, and returns the link text otherwise
+        link_to_string(link, pictures);
+    }
 }
 
 fn handle_heading(
@@ -702,6 +732,7 @@ pub fn mark_notes_as_seen(file: &Path) -> Result<(), MarkNotesAsSeenError> {
             6: |_, _| Ok(())
             7: |_, _| Ok(())
             8: |_, _| Ok(())
+            9: |_, _| Ok(())
         )?;
     }
 

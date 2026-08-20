@@ -28,6 +28,11 @@ Supported are:
   - Automatically converts .jxl files to normal jpeg, as anki doesn't yet support jpeg xl.
     - This requires `djxl` to be installed
   - Currently images are always shown on the backside of cards, although being able to configure this is planned.
+  - To show an image on the backside of all clozes in a file, put a `<!--anksidian:image-all-clozes-->` comment on its own line, followed by the image on the next line:
+    ```markdown
+    <!--anksidian:image-all-clozes-->
+    ![[image.jxl]]
+    ```
 - tags (#tag)
   - All tags in a file get added as Anki tags for all clozes in the file
   - Tags have to be at the start of separate lines
