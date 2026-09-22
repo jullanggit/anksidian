@@ -37,10 +37,10 @@ type FileElement = Or<(
 type File = AllConsumed<Vec<FileElement>>;
 
 // newline
-type Newline = Or<(TStr<"\r">, TStr<"\n">, TStr<"\r\n">)>;
+type Newline = Or<(TStr<"\r\n">, TStr<"\r">, TStr<"\n">)>;
 
 // heading
-type Element = Or<(Code, Math, Link, Bold, Italic, char)>;
+type Element = Or<(Code, Math, Link, Bold, Italic, Newline, char)>;
 type Heading = (
     VecN<1, TStr<"#">>,
     TStr<" ">,
@@ -414,7 +414,8 @@ fn element_to_string(
             Ok(accent_to_string(&bold, "b"))
         }
         4: |italic, _| Ok(italic_to_string(*italic))
-        5: |char, _| Ok(char.to_string())
+        5: |_newline, _| Ok("<br>".to_string())
+        6: |char, _| Ok(char.to_string())
     )
 }
 
